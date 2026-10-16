@@ -64,7 +64,13 @@ function Dashboard({ user }: { user: User }) {
     refresh: refreshRisk,
   } = useRiskAssessments(ports, vesselClass);
 
-  const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications(user.email);
+  const {
+    notifications,
+    unreadCount,
+    markAsRead,
+    markAllAsRead,
+    refresh: refreshNotifications,
+  } = useNotifications(user.email);
 
   const assessmentMap = useMemo(() => {
     const map = new Map();
@@ -111,6 +117,15 @@ function Dashboard({ user }: { user: User }) {
       setRefreshing(false);
     }
   }, [refreshRisk, selectedPort]);
+
+  const handleAddPort = useCallback(
+    async (port: Omit<Port, 'id' | 'isDefault' | 'addedByUserId'>) => {
+      const created = await addPort(port);
+      await refreshNotifications();
+      return created;
+    },
+    [addPort, refreshNotifications]
+  );
 
   const handleRemovePort = useCallback(
     async (portId?: string) => {
@@ -284,7 +299,7 @@ function Dashboard({ user }: { user: User }) {
             {/* Controls Bar */}
             <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
               <div className="flex-1 w-full max-w-md">
-                <PortSearch onAddPort={addPort} existingLocodes={existingLocodes} />
+                <PortSearch onAddPort={handleAddPort} existingLocodes={existingLocodes} />
               </div>
               <div className="flex items-center gap-2">
                 <VesselClassSelector value={vesselClass} onChange={setVesselClass} />

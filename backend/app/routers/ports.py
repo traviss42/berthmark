@@ -34,7 +34,23 @@ async def add_monitored_port(
     current_user: str = Depends(get_current_user),
     service: PortService = Depends(lambda: port_service),
 ) -> Port:
-    return await service.add_port(request=port_data, user_id=current_user)
+    new_port = await service.add_port(request=port_data, user_id=current_user)
+
+    # Immediately evaluate live baseline risk and send welcome/baseline email if opted in
+    if new_port.notificationsEnabled:
+        try:
+            from app.services.notification_service import notification_service
+            await notification_service.send_subscription_baseline_email(
+                port=new_port,
+                user_id=current_user,
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger("berthmark").warning(
+                f"Failed to send subscription baseline email: {e}"
+            )
+
+    return new_port
 
 
 @router.get(

@@ -258,7 +258,7 @@ Berthmark includes full test suites covering business logic, weakest-link scorin
 make test
 
 # Or run separately
-make test-backend    # 32 passed
+make test-backend    # 33 passed
 make test-frontend   # 39 passed
 ```
 

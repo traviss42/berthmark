@@ -1,7 +1,7 @@
 """Application configuration using pydantic-settings."""
 
 from functools import lru_cache
-from typing import List
+from typing import List, Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -32,6 +32,13 @@ class Settings(BaseSettings):
 
     # HTTP Client Configuration
     HTTP_TIMEOUT_SECONDS: float = Field(default=5.0, ge=1.0, le=60.0)
+
+    # Email & Outbound Alert Delivery
+    SMTP_HOST: Optional[str] = None
+    SMTP_PORT: int = 587
+    SMTP_USER: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    SMTP_FROM: str = "alerts@berthmark.com"
 
     @property
     def cors_origins(self) -> List[str]:

@@ -138,3 +138,46 @@ def test_notification_sent_to_login_email_and_opt_out_respected(client: TestClie
     assert notif_resp_2.status_code == 201
     assert notif_resp_2.json()["recipientEmail"] is None
 
+
+def test_immediate_subscription_baseline_email_sent(client: TestClient):
+    """Adding a monitored port immediately dispatches a baseline welcome email and creates a notification."""
+    from app.services.email_service import email_service
+    email_service._sent_emails.clear()
+
+    captain_headers = {"Authorization": "Bearer captain@rotterdam-logistics.nl"}
+
+    # Add port (defaults to notificationsEnabled=True)
+    resp = client.post(
+        "/api/v1/ports",
+        json={
+            "name": "Port of Rotterdam",
+            "locode": "NLRTM",
+            "country": "Netherlands",
+            "lat": 51.9,
+            "lon": 4.4,
+            "geofenceRadiusNm": 8.0,
+        },
+        headers=captain_headers,
+    )
+    assert resp.status_code == 201
+
+    # Fetch notifications for this user
+    notif_resp = client.get("/api/v1/notifications", headers=captain_headers)
+    assert notif_resp.status_code == 200
+    notifs = notif_resp.json()
+    assert len(notifs) >= 1
+
+    baseline_notif = notifs[0]
+    assert "Subscribed (Baseline Risk:" in baseline_notif["title"]
+    assert baseline_notif["recipientEmail"] == "captain@rotterdam-logistics.nl"
+    assert "baseline risk" in baseline_notif["message"].lower()
+
+    # Verify outbound email was recorded by email_service
+    matching_emails = [
+        e for e in email_service._sent_emails if e["to"] == "captain@rotterdam-logistics.nl"
+    ]
+    assert len(matching_emails) >= 1
+    assert "[Berthmark Alert] Subscribed to Port of Rotterdam" in matching_emails[0]["subject"]
+    assert "CURRENT LIVE BASELINE CONDITIONS" in matching_emails[0]["body"]
+
+
