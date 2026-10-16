@@ -10,13 +10,25 @@ import { NotificationPanel } from '@/components/NotificationPanel';
 import { getServices } from '@/services';
 
 export default function App() {
-  const { ports, loading: portsLoading, addPort, removePort } = usePorts();
+  const {
+    ports,
+    loading: portsLoading,
+    error: portsError,
+    addPort,
+    removePort,
+    refresh: refreshPorts,
+  } = usePorts();
   const [vesselClass, setVesselClass] = useState<VesselClass>('neoPanamax');
   const [selectedPortId, setSelectedPortId] = useState<string | null>(null);
   const [showNotifications, setShowNotifications] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  const { assessments, loading: riskLoading, refresh: refreshRisk } = useRiskAssessments(ports, vesselClass);
+  const {
+    assessments,
+    loading: riskLoading,
+    error: riskError,
+    refresh: refreshRisk,
+  } = useRiskAssessments(ports, vesselClass);
   const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
 
   const assessmentMap = useMemo(() => {
@@ -90,6 +102,16 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-3">
+              <div className="hidden sm:flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-slate-100 border border-slate-200">
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    portsError || riskError ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'
+                  }`}
+                />
+                <span className="text-slate-600 font-medium">
+                  {portsError || riskError ? 'FastAPI: Offline/Error' : 'FastAPI: Connected'}
+                </span>
+              </div>
               <div className="hidden md:flex items-center gap-2 text-sm">
                 <Globe className="w-4 h-4 text-slate-400" />
                 <span className="text-slate-600">{ports.length} ports tracked</span>
@@ -126,6 +148,30 @@ export default function App() {
 
       {/* Main content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {(portsError || riskError) && (
+          <div className="mb-6 rounded-lg bg-red-50 border border-red-200 p-4 flex items-start justify-between">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <h4 className="text-sm font-semibold text-red-800">FastAPI Backend Communication Issue</h4>
+                <p className="text-xs text-red-700 mt-1">{portsError || riskError}</p>
+                <p className="text-[11px] text-red-600 mt-1 font-mono">
+                  Make sure backend is running: make run-backend (http://localhost:8000)
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                refreshPorts();
+                refreshRisk();
+              }}
+              className="text-xs font-medium px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-800 rounded-md transition-colors flex-shrink-0"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
         {selectedAssessment && selectedPort ? (
           <PortRiskDetail
             assessment={selectedAssessment}

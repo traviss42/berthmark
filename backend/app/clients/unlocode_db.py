@@ -43,13 +43,26 @@ def is_maritime_port(function_code: Optional[str]) -> bool:
     return func.startswith("1") or "1" in func[:2]
 
 
+def _resolve_data_path(path_str: str) -> str:
+    p = Path(path_str)
+    if p.is_absolute():
+        return str(p)
+    if p.exists() or p.parent.exists():
+        return str(p)
+    parts = p.parts
+    if parts and parts[0] == "backend":
+        sub = Path(*parts[1:])
+        return str(sub)
+    return str(p)
+
+
 class UnlocodeDatabase:
     """Embedded SQLite database for high-performance UN/LOCODE lookups and fuzzy searches."""
 
     def __init__(self, db_path: Optional[str] = None, seed_path: Optional[str] = None):
         settings = get_settings()
-        self.db_path = db_path or settings.UNLOCODE_DB_PATH
-        self.seed_path = seed_path or settings.UNLOCODE_SEED_PATH
+        self.db_path = _resolve_data_path(db_path or settings.UNLOCODE_DB_PATH)
+        self.seed_path = _resolve_data_path(seed_path or settings.UNLOCODE_SEED_PATH)
 
         # Ensure parent directory exists
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)

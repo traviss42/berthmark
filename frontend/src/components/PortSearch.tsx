@@ -14,19 +14,27 @@ export function PortSearch({ onAddPort, existingLocodes }: Props) {
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const services = getServices();
 
   useEffect(() => {
-    if (query.trim().length < 2) {
+    const q = query.trim();
+    if (!q) {
       setResults([]);
+      setSearchError(null);
       return;
     }
     setLoading(true);
+    setSearchError(null);
     const timer = setTimeout(async () => {
       try {
-        const ports = await services.ports.searchPorts(query);
+        const ports = await services.ports.searchPorts(q);
         setResults(ports);
+        setOpen(true);
+      } catch (err) {
+        setSearchError(err instanceof Error ? err.message : 'Search failed');
+        setResults([]);
         setOpen(true);
       } finally {
         setLoading(false);
@@ -86,12 +94,17 @@ export function PortSearch({ onAddPort, existingLocodes }: Props) {
         )}
       </div>
 
-      {open && (loading || results.length > 0) && (
+      {open && (loading || results.length > 0 || searchError || (!loading && query.trim().length > 0)) && (
         <div className="absolute z-20 mt-2 w-full rounded-lg border border-slate-200 bg-white shadow-lg max-h-72 overflow-y-auto">
           {loading && (
             <div className="px-4 py-3 text-sm text-slate-400">Searching...</div>
           )}
-          {!loading && results.map((port) => {
+          {searchError && (
+            <div className="px-4 py-3 text-sm text-red-600 bg-red-50">
+              {searchError}
+            </div>
+          )}
+          {!loading && !searchError && results.map((port) => {
             const alreadyAdded = existingLocodes.includes(port.locode);
             return (
               <div
@@ -116,12 +129,11 @@ export function PortSearch({ onAddPort, existingLocodes }: Props) {
               </div>
             );
           })}
-        </div>
-      )}
-
-      {open && !loading && query.trim().length >= 2 && results.length === 0 && (
-        <div className="absolute z-20 mt-2 w-full rounded-lg border border-slate-200 bg-white shadow-lg px-4 py-3 text-sm text-slate-400">
-          No ports found. Try a different name or LOCODE.
+          {open && !loading && !searchError && query.trim().length > 0 && results.length === 0 && (
+            <div className="px-4 py-3 text-sm text-slate-400">
+              No ports found. Try a different name or UN/LOCODE.
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -58,6 +58,7 @@ htmlcov/
 *.env
 *.pem
 *.key
+docs/environment-setup.md
 
 # Logs
 logs
