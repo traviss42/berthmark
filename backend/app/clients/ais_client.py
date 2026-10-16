@@ -5,10 +5,13 @@ import json
 import logging
 import math
 import time
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 import httpx
 import websockets
 from app.config import get_settings
+from app.db.session import get_db_context
+from app.models.external_cache import ExternalAISTrafficCache
 from app.models.risk import CongestionMetrics, NavigationalMetrics, TerminalMetrics
 
 logger = logging.getLogger(__name__)
@@ -26,7 +29,7 @@ DEFAULT_COORDS = {
 
 
 class AISClient:
-    """Client for AISStream WebSocket live vessel traffic API with fallback simulation."""
+    """Client for AISStream WebSocket live vessel traffic API with SQLite caching and fallback simulation."""
 
     def __init__(
         self,
@@ -40,9 +43,9 @@ class AISClient:
         self.base_url = base_url or settings.AISSTREAM_BASE_URL
         self.ws_url = ws_url or getattr(settings, "AISSTREAM_WS_URL", "wss://stream.aisstream.io/v0/stream")
         self.timeout = timeout or settings.HTTP_TIMEOUT_SECONDS
-
-        # In-memory traffic cache: key -> (timestamp, metrics)
         self._cache: Dict[str, Tuple[float, Tuple[CongestionMetrics, TerminalMetrics, NavigationalMetrics]]] = {}
+        self._live_vessel_cache: Dict[Tuple[float, float], Tuple[float, Optional[int]]] = {}
+        self.cache_ttl_seconds: float = 1800.0  # 30 minutes TTL
 
     def _generate_fallback_metrics(
         self, port_id: str, vessel_class: str, live_vessel_count: Optional[int] = None
@@ -147,6 +150,77 @@ class AISClient:
             logger.debug("AISStream WebSocket connection failed or timed out: %s", str(e))
             return None
 
+    def _persist_ais_cache(
+        self,
+        cache_key: str,
+        port_id: str,
+        locode: str,
+        vessel_class: str,
+        metrics: Tuple[CongestionMetrics, TerminalMetrics, NavigationalMetrics],
+        source: str,
+    ) -> None:
+        """Persist or update AIS traffic metrics in SQLite database."""
+        try:
+            with get_db_context() as db:
+                record = db.query(ExternalAISTrafficCache).filter(
+                    (ExternalAISTrafficCache.id == cache_key)
+                    | (
+                        (ExternalAISTrafficCache.locode == locode)
+                        & (ExternalAISTrafficCache.vessel_class == vessel_class)
+                    )
+                ).first()
+
+                congestion, terminal, navigational = metrics
+                now_utc = datetime.now(timezone.utc)
+
+                if not record:
+                    record = ExternalAISTrafficCache(
+                        id=cache_key,
+                        port_id=port_id,
+                        locode=locode,
+                        vessel_class=vessel_class,
+                        anchorage_queue_count=congestion.anchorageQueueCount,
+                        avg_waiting_time_hours=congestion.avgWaitingTimeHours,
+                        berth_occupancy_pct=congestion.berthOccupancyPct,
+                        rolling_30d_avg_queue=congestion.rolling30dAvgQueue,
+                        rolling_30d_avg_wait_hours=congestion.rolling30dAvgWaitHours,
+                        berth_turnaround_hours=terminal.berthTurnaroundHours,
+                        berth_to_anchorage_wait_ratio=terminal.berthToAnchorageWaitRatio,
+                        dwell_time_anomaly_score=terminal.dwellTimeAnomalyScore,
+                        rolling_30d_avg_turnaround=terminal.rolling30dAvgTurnaround,
+                        under_keel_clearance_m=navigational.underKeelClearanceM,
+                        channel_depth_m=navigational.channelDepthM,
+                        air_draft_clearance_m=navigational.airDraftClearanceM,
+                        pilotage_available=navigational.pilotageAvailable,
+                        tide_height_m=navigational.tideHeightM,
+                        source=source,
+                        fetched_at=now_utc,
+                    )
+                    db.add(record)
+                else:
+                    record.port_id = port_id
+                    record.locode = locode
+                    record.vessel_class = vessel_class
+                    record.anchorage_queue_count = congestion.anchorageQueueCount
+                    record.avg_waiting_time_hours = congestion.avgWaitingTimeHours
+                    record.berth_occupancy_pct = congestion.berthOccupancyPct
+                    record.rolling_30d_avg_queue = congestion.rolling30dAvgQueue
+                    record.rolling_30d_avg_wait_hours = congestion.rolling30dAvgWaitHours
+                    record.berth_turnaround_hours = terminal.berthTurnaroundHours
+                    record.berth_to_anchorage_wait_ratio = terminal.berthToAnchorageWaitRatio
+                    record.dwell_time_anomaly_score = terminal.dwellTimeAnomalyScore
+                    record.rolling_30d_avg_turnaround = terminal.rolling30dAvgTurnaround
+                    record.under_keel_clearance_m = navigational.underKeelClearanceM
+                    record.channel_depth_m = navigational.channelDepthM
+                    record.air_draft_clearance_m = navigational.airDraftClearanceM
+                    record.pilotage_available = navigational.pilotageAvailable
+                    record.tide_height_m = navigational.tideHeightM
+                    record.source = source
+                    record.fetched_at = now_utc
+                db.commit()
+        except Exception as e:
+            logger.warning("Failed to persist AIS traffic metrics to SQLite: %s", str(e))
+
     async def get_port_traffic_metrics(
         self,
         port_id: str,
@@ -157,15 +231,37 @@ class AISClient:
         geofence_radius_nm: float = 8.0,
         force_refresh: bool = False,
     ) -> Tuple[CongestionMetrics, TerminalMetrics, NavigationalMetrics]:
-        """Fetch AIS and operational metrics with WebSocket live sampling and cache."""
+        """Fetch AIS and operational metrics with SQLite caching (< 30 min freshness)."""
         cache_key = f"{port_id}:{vessel_class}"
         now = time.time()
-        if not force_refresh and cache_key in self._cache:
-            ts, cached_metrics = self._cache[cache_key]
-            if now - ts < 300.0:  # 5 minute cache
-                return cached_metrics
 
-        # 1. Check HTTP mock for unit tests
+        # 1. Check SQLite for fresh cached data (< 30 minutes old)
+        if not force_refresh:
+            try:
+                with get_db_context() as db:
+                    cached_record = db.query(ExternalAISTrafficCache).filter(
+                        (ExternalAISTrafficCache.id == cache_key)
+                        | (
+                            (ExternalAISTrafficCache.locode == locode)
+                            & (ExternalAISTrafficCache.vessel_class == vessel_class)
+                        )
+                    ).first()
+
+                    if cached_record and cached_record.is_fresh(
+                        max_age_seconds=self.cache_ttl_seconds
+                    ):
+                        metrics = cached_record.to_pydantic()
+                        self._cache[cache_key] = (now, metrics)
+                        return metrics
+            except Exception as e:
+                logger.debug("Database AIS traffic cache lookup failed: %s", str(e))
+
+            if cache_key in self._cache:
+                ts, cached_metrics = self._cache[cache_key]
+                if now - ts < self.cache_ttl_seconds:
+                    return cached_metrics
+
+        # 2. Check HTTP mock for unit tests
         if (
             self.base_url
             and "aisstream.io" not in self.base_url
@@ -185,17 +281,28 @@ class AISClient:
                             TerminalMetrics(**data["terminal"]),
                             NavigationalMetrics(**data["navigational"]),
                         )
+                        self._persist_ais_cache(
+                            cache_key, port_id, locode, vessel_class, result, source="http-mock"
+                        )
                         self._cache[cache_key] = (now, result)
                         return result
             except Exception as e:
                 logger.debug("Mock HTTP AIS call failed: %s", str(e))
 
-        # 2. Query AISStream live WebSocket if API key is configured
+        # 3. Query AISStream live WebSocket if API key is configured
         live_vessels: Optional[int] = None
+        source = "simulated-fallback"
         if self.api_key and self.api_key.strip():
             port_lat, port_lon = (lat, lon) if lat is not None and lon is not None else DEFAULT_COORDS.get(locode, (51.9244, 4.4777))
-            live_vessels = await self._query_aisstream_ws(port_lat, port_lon, geofence_radius_nm)
+            coord_key = (round(port_lat, 2), round(port_lon, 2))
+            if coord_key in self._live_vessel_cache and (now - self._live_vessel_cache[coord_key][0] < 30.0):
+                live_vessels = self._live_vessel_cache[coord_key][1]
+            else:
+                live_vessels = await self._query_aisstream_ws(port_lat, port_lon, geofence_radius_nm)
+                self._live_vessel_cache[coord_key] = (now, live_vessels)
+
             if live_vessels is not None:
+                source = "aisstream"
                 logger.info(
                     "AISStream live vessel stream connected for %s (%s): %d active vessels detected in geofence.",
                     locode,
@@ -203,7 +310,11 @@ class AISClient:
                     live_vessels,
                 )
 
-        # 3. Generate calibrated metrics
+        # 4. Generate calibrated metrics
         metrics = self._generate_fallback_metrics(port_id, vessel_class, live_vessel_count=live_vessels)
+        self._persist_ais_cache(
+            cache_key, port_id, locode, vessel_class, metrics, source=source
+        )
         self._cache[cache_key] = (now, metrics)
         return metrics
+

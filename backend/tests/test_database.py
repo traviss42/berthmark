@@ -107,3 +107,97 @@ def test_notification_record_model_persistence():
         assert updated.read is True
         pydantic_notif = updated.to_pydantic()
         assert pydantic_notif.read is True
+
+
+def test_external_weather_cache_persistence_and_freshness():
+    """Verify ExternalWeatherCache entity persists, converts to Pydantic, and tracks freshness."""
+    from datetime import datetime, timezone, timedelta
+    from app.db.models import ExternalWeatherCache
+
+    now = datetime.now(timezone.utc)
+    with get_db_context() as db:
+        record = ExternalWeatherCache(
+            id="51.92:4.48",
+            lat=51.92,
+            lon=4.48,
+            port_id="port-rtm-01",
+            wind_speed_knots=24.5,
+            gust_speed_knots=31.2,
+            wave_height_m=2.1,
+            swell_period_sec=6.5,
+            visibility_nm=9.0,
+            source="open-meteo",
+            fetched_at=now,
+        )
+        db.add(record)
+        db.commit()
+
+    with get_db_context() as db:
+        queried = db.query(ExternalWeatherCache).filter(ExternalWeatherCache.id == "51.92:4.48").first()
+        assert queried is not None
+        assert queried.wind_speed_knots == 24.5
+        assert queried.source == "open-meteo"
+        assert queried.is_fresh(1800.0) is True
+
+        # Test stale check
+        queried.fetched_at = now - timedelta(minutes=45)
+        db.commit()
+
+    with get_db_context() as db:
+        stale_record = db.query(ExternalWeatherCache).filter(ExternalWeatherCache.id == "51.92:4.48").first()
+        assert stale_record.is_fresh(1800.0) is False
+        pydantic_weather = stale_record.to_pydantic()
+        assert pydantic_weather.windSpeedKnots == 24.5
+        assert pydantic_weather.waveHeightM == 2.1
+
+
+def test_external_ais_traffic_cache_persistence_and_freshness():
+    """Verify ExternalAISTrafficCache entity persists, tracks freshness, and converts to Pydantic."""
+    from datetime import datetime, timezone, timedelta
+    from app.db.models import ExternalAISTrafficCache
+
+    now = datetime.now(timezone.utc)
+    with get_db_context() as db:
+        record = ExternalAISTrafficCache(
+            id="port-rtm-01:panamax",
+            port_id="port-rtm-01",
+            locode="NLRTM",
+            vessel_class="panamax",
+            anchorage_queue_count=14,
+            avg_waiting_time_hours=19.5,
+            berth_occupancy_pct=78.0,
+            rolling_30d_avg_queue=11.0,
+            rolling_30d_avg_wait_hours=18.0,
+            berth_turnaround_hours=26.0,
+            berth_to_anchorage_wait_ratio=0.55,
+            dwell_time_anomaly_score=42.0,
+            rolling_30d_avg_turnaround=25.0,
+            under_keel_clearance_m=2.2,
+            channel_depth_m=15.5,
+            air_draft_clearance_m=7.0,
+            pilotage_available=True,
+            tide_height_m=1.8,
+            source="aisstream",
+            fetched_at=now,
+        )
+        db.add(record)
+        db.commit()
+
+    with get_db_context() as db:
+        queried = db.query(ExternalAISTrafficCache).filter(ExternalAISTrafficCache.id == "port-rtm-01:panamax").first()
+        assert queried is not None
+        assert queried.anchorage_queue_count == 14
+        assert queried.is_fresh(1800.0) is True
+
+        cong, term, nav = queried.to_pydantic()
+        assert cong.anchorageQueueCount == 14
+        assert term.berthTurnaroundHours == 26.0
+        assert nav.channelDepthM == 15.5
+
+        # Test stale check
+        queried.fetched_at = now - timedelta(minutes=35)
+        db.commit()
+
+    with get_db_context() as db:
+        stale_record = db.query(ExternalAISTrafficCache).filter(ExternalAISTrafficCache.id == "port-rtm-01:panamax").first()
+        assert stale_record.is_fresh(1800.0) is False

@@ -3,7 +3,12 @@
 import pytest
 from fastapi.testclient import TestClient
 from app.db import init_db, get_db_context
-from app.db.models import MonitoredPort, NotificationRecord
+from app.db.models import (
+    ExternalAISTrafficCache,
+    ExternalWeatherCache,
+    MonitoredPort,
+    NotificationRecord,
+)
 from app.main import app
 
 
@@ -19,6 +24,8 @@ def reset_database():
     with get_db_context() as db:
         db.query(NotificationRecord).delete()
         db.query(MonitoredPort).delete()
+        db.query(ExternalWeatherCache).delete()
+        db.query(ExternalAISTrafficCache).delete()
         db.commit()
     yield
 

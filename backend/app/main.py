@@ -12,9 +12,27 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Lifespan context manager initializing database tables on startup."""
+    """Lifespan context manager initializing database tables and managing background ingestion."""
     init_db()
-    yield
+    if getattr(settings, "ENABLE_INGESTION", True) and settings.ENVIRONMENT != "testing":
+        try:
+            from app.services.ingestion import start_ingestion_scheduler
+            start_ingestion_scheduler(
+                interval_minutes=getattr(settings, "INGESTION_INTERVAL_MINUTES", 30)
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Could not start background ingestion: %s", str(e))
+
+    try:
+        yield
+    finally:
+        try:
+            from app.services.ingestion import stop_ingestion_scheduler
+            stop_ingestion_scheduler()
+        except Exception:
+            pass
+
 
 
 app = FastAPI(

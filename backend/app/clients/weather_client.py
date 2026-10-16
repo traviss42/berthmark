@@ -2,9 +2,12 @@
 
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Dict, Optional, Tuple
 import httpx
 from app.config import get_settings
+from app.db.session import get_db_context
+from app.models.external_cache import ExternalWeatherCache
 from app.models.risk import WeatherMetrics
 
 logger = logging.getLogger(__name__)
@@ -20,7 +23,7 @@ def _safe_float(val: object, default: float) -> float:
 
 
 class MarineWeatherClient:
-    """Client for external Marine Weather API with TTL caching and fallback simulation."""
+    """Client for external Marine Weather API with SQLite caching and fallback simulation."""
 
     def __init__(self, base_url: Optional[str] = None, timeout: Optional[float] = None):
         settings = get_settings()
@@ -28,7 +31,7 @@ class MarineWeatherClient:
         self.forecast_url = "https://api.open-meteo.com/v1/forecast"
         self.timeout = timeout or settings.HTTP_TIMEOUT_SECONDS
         self._cache: Dict[str, Tuple[float, WeatherMetrics]] = {}
-        self.cache_ttl_seconds: float = 900.0  # 15 minutes TTL
+        self.cache_ttl_seconds: float = 1800.0  # 30 minutes TTL
 
     def _generate_fallback_weather(self, lat: float, lon: float, port_id: str) -> WeatherMetrics:
         """Deterministic fallback marine weather metrics when external API is offline or rate-limited."""
@@ -47,17 +50,106 @@ class MarineWeatherClient:
             visibilityNm=round(visibility, 1),
         )
 
+    def _persist_weather_cache(
+        self,
+        cache_key: str,
+        lat: float,
+        lon: float,
+        port_id: str,
+        metrics: WeatherMetrics,
+        source: str,
+    ) -> None:
+        """Persist or update weather metrics in SQLite database."""
+        try:
+            with get_db_context() as db:
+                record = db.query(ExternalWeatherCache).filter(
+                    (ExternalWeatherCache.id == cache_key)
+                    | (
+                        (ExternalWeatherCache.lat == round(lat, 2))
+                        & (ExternalWeatherCache.lon == round(lon, 2))
+                    )
+                ).first()
+                if not record and port_id:
+                    record = (
+                        db.query(ExternalWeatherCache)
+                        .filter(ExternalWeatherCache.port_id == port_id)
+                        .first()
+                    )
+
+                now_utc = datetime.now(timezone.utc)
+                if not record:
+                    record = ExternalWeatherCache(
+                        id=cache_key,
+                        lat=round(lat, 2),
+                        lon=round(lon, 2),
+                        port_id=port_id or None,
+                        wind_speed_knots=metrics.windSpeedKnots,
+                        gust_speed_knots=metrics.gustSpeedKnots,
+                        wave_height_m=metrics.waveHeightM,
+                        swell_period_sec=metrics.swellPeriodSec,
+                        visibility_nm=metrics.visibilityNm,
+                        source=source,
+                        fetched_at=now_utc,
+                    )
+                    db.add(record)
+                else:
+                    record.lat = round(lat, 2)
+                    record.lon = round(lon, 2)
+                    if port_id:
+                        record.port_id = port_id
+                    record.wind_speed_knots = metrics.windSpeedKnots
+                    record.gust_speed_knots = metrics.gustSpeedKnots
+                    record.wave_height_m = metrics.waveHeightM
+                    record.swell_period_sec = metrics.swellPeriodSec
+                    record.visibility_nm = metrics.visibilityNm
+                    record.source = source
+                    record.fetched_at = now_utc
+                db.commit()
+        except Exception as e:
+            logger.warning("Failed to persist weather metrics to SQLite: %s", str(e))
+
     async def get_marine_weather(
         self, lat: float, lon: float, port_id: str = "", force_refresh: bool = False
     ) -> WeatherMetrics:
-        """Fetch real-time marine weather metrics with TTL caching."""
+        """Fetch real-time marine weather metrics with SQLite caching (< 30 min freshness)."""
         cache_key = f"{round(lat, 2)}:{round(lon, 2)}"
         now = time.time()
 
-        if not force_refresh and cache_key in self._cache:
-            cached_time, cached_metrics = self._cache[cache_key]
-            if now - cached_time < self.cache_ttl_seconds:
-                return cached_metrics
+        # 1. Check SQLite for fresh cached data (< 30 minutes old)
+        if not force_refresh:
+            try:
+                with get_db_context() as db:
+                    query = db.query(ExternalWeatherCache).filter(
+                        (ExternalWeatherCache.id == cache_key)
+                        | (
+                            (ExternalWeatherCache.lat == round(lat, 2))
+                            & (ExternalWeatherCache.lon == round(lon, 2))
+                        )
+                    )
+                    cached_record = query.first()
+                    if not cached_record and port_id:
+                        cached_record = (
+                            db.query(ExternalWeatherCache)
+                            .filter(ExternalWeatherCache.port_id == port_id)
+                            .first()
+                        )
+
+                    if cached_record and cached_record.is_fresh(
+                        max_age_seconds=self.cache_ttl_seconds
+                    ):
+                        metrics = cached_record.to_pydantic()
+                        self._cache[cache_key] = (now, metrics)
+                        return metrics
+            except Exception as e:
+                logger.debug("Database weather cache lookup failed: %s", str(e))
+
+            # Check in-memory fallback cache
+            if cache_key in self._cache:
+                cached_time, cached_metrics = self._cache[cache_key]
+                if now - cached_time < self.cache_ttl_seconds:
+                    return cached_metrics
+
+        # 2. Query external Open-Meteo API
         params = {
             "latitude": lat,
             "longitude": lon,
@@ -68,7 +160,6 @@ class MarineWeatherClient:
 
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
-                # 1. Attempt marine API for wave height and wind
                 wave_height = 1.5
                 wind_speed = 18.0
                 wind_gust = 23.4
@@ -91,7 +182,6 @@ class MarineWeatherClient:
                         wind_gust = _safe_float(wind_gusts[0] if wind_gusts else None, wind_speed * 1.3)
                         got_wind = True
 
-                # 2. If marine API didn't provide wind (e.g., inland water bodies), query forecast API
                 if not got_wind:
                     forecast_params = {
                         "latitude": lat,
@@ -117,11 +207,18 @@ class MarineWeatherClient:
                     swellPeriodSec=7.5,
                     visibilityNm=8.0,
                 )
-                self._cache[cache_key] = (time.time(), metrics)
+                self._persist_weather_cache(
+                    cache_key, lat, lon, port_id, metrics, source="open-meteo"
+                )
+                self._cache[cache_key] = (now, metrics)
                 return metrics
         except Exception as e:
             logger.warning("Failed to reach weather API: %s. Utilizing fallback.", str(e))
 
         fallback = self._generate_fallback_weather(lat, lon, port_id)
-        self._cache[cache_key] = (time.time(), fallback)
+        self._persist_weather_cache(
+            cache_key, lat, lon, port_id, fallback, source="simulated-fallback"
+        )
+        self._cache[cache_key] = (now, fallback)
         return fallback
+

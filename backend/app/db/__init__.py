@@ -1,7 +1,7 @@
 """Database package exporting models, engine, session factory, and initialization."""
 
 from app.db.base import Base
-from app.db.models import MonitoredPort, NotificationRecord
+from app.db.models import ExternalAISTrafficCache, ExternalWeatherCache, MonitoredPort, NotificationRecord
 from app.db.session import (
     SessionLocal,
     create_app_engine,
@@ -14,6 +14,8 @@ from app.db.session import (
 
 __all__ = [
     "Base",
+    "ExternalWeatherCache",
+    "ExternalAISTrafficCache",
     "MonitoredPort",
     "NotificationRecord",
     "SessionLocal",

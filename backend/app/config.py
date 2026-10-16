@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: Optional[str] = None
     SMTP_FROM: str = "alerts@berthmark.com"
 
+    # Background Telemetry Ingestion (APScheduler)
+    INGESTION_INTERVAL_MINUTES: int = 30
+    ENABLE_INGESTION: bool = True
+
     @property
     def cors_origins(self) -> List[str]:
         return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]

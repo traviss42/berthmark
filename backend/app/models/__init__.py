@@ -16,6 +16,7 @@ from app.models.risk import (
     TerminalMetrics,
     WeatherMetrics,
 )
+from app.models.external_cache import ExternalAISTrafficCache, ExternalWeatherCache
 
 __all__ = [
     "RiskTier",
@@ -41,4 +42,6 @@ __all__ = [
     "LoginRequest",
     "LoginResponse",
     "UserResponse",
+    "ExternalWeatherCache",
+    "ExternalAISTrafficCache",
 ]

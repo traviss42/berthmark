@@ -7,6 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 from app.models.port import Port
 from app.models.notification import Notification
+from app.models.external_cache import ExternalWeatherCache, ExternalAISTrafficCache
 
 
 class MonitoredPort(Base):
