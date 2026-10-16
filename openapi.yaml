@@ -1,0 +1,1026 @@
+openapi: 3.0.3
+info:
+  title: Berthmark API
+  version: 1.0.0
+  description: >
+    Backend REST API specification for Berthmark, a Port-Call Risk Tracking & Assessment Tool.
+    This specification defines all endpoints, methods, schemas, and authentication models
+    expected by the React/TypeScript frontend (interfaces defined in `frontend/src/services/interfaces.ts`
+    and `frontend/src/types/index.ts`).
+servers:
+  - url: http://localhost:8000
+    description: Local development backend server
+  - url: https://api.berthmark.com
+    description: Production API server
+
+tags:
+  - name: Ports
+    description: Management, discovery, and search of monitored global and private ports
+  - name: Risk
+    description: Real-time and historical multi-factor port-call risk assessment engine
+  - name: Notifications
+    description: Alerting, state-change transitions, and user notifications
+
+paths:
+  # ───────────────────────────────────────────────────────────────────────────
+  # PORTS ENDPOINTS
+  # ───────────────────────────────────────────────────────────────────────────
+  /api/v1/ports:
+    get:
+      tags:
+        - Ports
+      summary: Get monitored ports for the authenticated user
+      description: >
+        Returns all ports monitored by the authenticated user. This combines default
+        global ports with custom ports privately added by the user.
+      operationId: getPorts
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Successfully retrieved monitored ports list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Port'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      tags:
+        - Ports
+      summary: Add a custom monitored port
+      description: >
+        Adds a new private monitored port for the authenticated user with custom geofence
+        and coordinates. The created port is scoped privately to the user (`addedByUserId`).
+      operationId: addPort
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        description: Port configuration parameters to track
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePortRequest'
+      responses:
+        '201':
+          description: Port successfully registered for monitoring
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Port'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '409':
+          description: Port with this UN/LOCODE is already monitored by this user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/ports/defaults:
+    get:
+      tags:
+        - Ports
+      summary: Get global default ports
+      description: >
+        Returns standard pre-configured global maritime hubs (Rotterdam, Singapore, Shanghai,
+        Hamburg, Los Angeles, Jebel Ali) with baseline configurations.
+      operationId: getDefaultPorts
+      security: []
+      responses:
+        '200':
+          description: Successfully retrieved global default ports
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Port'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/ports/search:
+    get:
+      tags:
+        - Ports
+      summary: Search ports directory
+      description: >
+        Searches the global reference port directory (UN/LOCODE, World Port Index)
+        by port name, UN/LOCODE, or country.
+      operationId: searchPorts
+      security: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Search query matching port name, UN/LOCODE, or country
+          schema:
+            type: string
+            minLength: 1
+            example: "Rotterdam"
+      responses:
+        '200':
+          description: List of matching ports
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Port'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/ports/{portId}:
+    get:
+      tags:
+        - Ports
+      summary: Get port details by ID
+      description: Retrieves a specific port by its ID if it is a default port or owned by the user.
+      operationId: getPortById
+      security:
+        - BearerAuth: []
+        - {}
+      parameters:
+        - $ref: '#/components/parameters/PortIdParam'
+      responses:
+        '200':
+          description: Port details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Port'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags:
+        - Ports
+      summary: Remove a custom monitored port
+      description: >
+        Removes a custom port from the authenticated user's tracked portfolio.
+        Default global ports cannot be removed.
+      operationId: removePort
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PortIdParam'
+      responses:
+        '204':
+          description: Port successfully removed from user tracking
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: Forbidden - cannot delete default global ports or ports owned by another user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # RISK ENDPOINTS
+  # ───────────────────────────────────────────────────────────────────────────
+  /api/v1/ports/{portId}/risk:
+    get:
+      tags:
+        - Risk
+      summary: Get real-time risk assessment for a port and vessel class
+      description: >
+        Calculates and returns the latest composite risk score, sub-risk breakdown
+        (congestion, terminal delays, weather, navigational), and raw sensor/AIS metrics
+        for a designated port evaluated against the specific vessel class constraints.
+      operationId: getRiskAssessment
+      security:
+        - BearerAuth: []
+        - {}
+      parameters:
+        - $ref: '#/components/parameters/PortIdParam'
+        - name: vesselClass
+          in: query
+          required: true
+          description: Target vessel taxonomy class for risk evaluation
+          schema:
+            $ref: '#/components/schemas/VesselClass'
+          example: "neoPanamax"
+        - name: portName
+          in: query
+          required: false
+          description: Optional port name hint
+          schema:
+            type: string
+            example: "Port of Rotterdam"
+      responses:
+        '200':
+          description: Risk assessment result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RiskAssessment'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/risk/bulk-assessments:
+    post:
+      tags:
+        - Risk
+      summary: Bulk evaluate risk assessments for multiple ports
+      description: >
+        Computes risk assessments across an array of ports for a specific vessel class
+        in a single request. Used by dashboard views to populate the multi-port overview.
+      operationId: getBulkRiskAssessments
+      security:
+        - BearerAuth: []
+        - {}
+      requestBody:
+        required: true
+        description: List of ports and target vessel class to assess
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkRiskAssessmentRequest'
+      responses:
+        '200':
+          description: Array of risk assessments corresponding to requested ports
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RiskAssessment'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/ports/{portId}/risk/trend:
+    get:
+      tags:
+        - Risk
+      summary: Get historical risk assessments trend
+      description: >
+        Returns time-series risk evaluations over the past N days (evaluated on a 6-hour cycle)
+        for trend analysis and chart visualizations.
+      operationId: getHistoricalTrend
+      security:
+        - BearerAuth: []
+        - {}
+      parameters:
+        - $ref: '#/components/parameters/PortIdParam'
+        - name: vesselClass
+          in: query
+          required: true
+          description: Vessel class for historical scoring
+          schema:
+            $ref: '#/components/schemas/VesselClass'
+          example: "panamax"
+        - name: days
+          in: query
+          required: false
+          description: Number of historical days to retrieve (4 evaluations/day, capped at 40 points)
+          schema:
+            type: integer
+            default: 7
+            minimum: 1
+            maximum: 30
+          example: 7
+      responses:
+        '200':
+          description: Chronological array of historical risk assessments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RiskAssessment'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # NOTIFICATIONS ENDPOINTS
+  # ───────────────────────────────────────────────────────────────────────────
+  /api/v1/notifications:
+    get:
+      tags:
+        - Notifications
+      summary: Get user notifications
+      description: >
+        Retrieves in-app alert notifications, state-change transitions, and daily digest items
+        for the authenticated user in reverse chronological order.
+      operationId: getNotifications
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: unreadOnly
+          in: query
+          required: false
+          description: Filter for unread notifications only
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: List of notifications for user
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Notification'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/notifications/{notificationId}/read:
+    patch:
+      tags:
+        - Notifications
+      summary: Mark a single notification as read
+      description: Marks an individual user notification as read.
+      operationId: markNotificationAsRead
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/NotificationIdParam'
+      responses:
+        '200':
+          description: Notification successfully marked as read
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/notifications/mark-all-read:
+    post:
+      tags:
+        - Notifications
+      summary: Mark all notifications as read
+      description: Marks all active notifications for the authenticated user as read.
+      operationId: markAllNotificationsAsRead
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: All notifications successfully marked as read
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/notifications/alerts:
+    post:
+      tags:
+        - Notifications
+      summary: Create or trigger a risk state-change alert
+      description: >
+        Creates a state-change notification when a port transitions between risk tiers.
+        Invoked by the backend 6-hour evaluation pipeline or during testing/alert generation.
+      operationId: generateStateChangeAlert
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAlertRequest'
+      responses:
+        '201':
+          description: Alert notification created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMPONENTS: SCHEMAS, PARAMETERS, RESPONSES, SECURITY
+# ─────────────────────────────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Bearer token (JWT issued by Supabase Auth / OAuth2 provider).
+
+  parameters:
+    PortIdParam:
+      name: portId
+      in: path
+      required: true
+      description: Unique identifier of the port (e.g. `port-rotterdam`)
+      schema:
+        type: string
+      example: "port-rotterdam"
+
+    NotificationIdParam:
+      name: notificationId
+      in: path
+      required: true
+      description: Unique identifier of the notification
+      schema:
+        type: string
+      example: "notif-1729036800-abc123"
+
+  responses:
+    BadRequestError:
+      description: Bad Request - invalid parameters or body schema
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    UnauthorizedError:
+      description: Unauthorized - missing, expired, or invalid Bearer authentication token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFoundError:
+      description: Not Found - requested resource does not exist or user lacks access
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InternalServerError:
+      description: Internal Server Error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    # ── Enums ──
+    RiskTier:
+      type: string
+      enum:
+        - low
+        - medium
+        - high
+      description: Discrete evaluation tier for composite and sub-risk scores
+      example: "medium"
+
+    SubRiskCategory:
+      type: string
+      enum:
+        - congestion
+        - terminalDelays
+        - weather
+        - navigational
+      description: Operational risk category evaluated by the engine
+      example: "congestion"
+
+    VesselSector:
+      type: string
+      enum:
+        - containerized
+        - liquidBulk
+        - dryBulk
+        - specialized
+      description: Broad commercial shipping sector
+      example: "containerized"
+
+    VesselClass:
+      type: string
+      enum:
+        # Containerized
+        - feeder
+        - panamax
+        - neoPanamax
+        - ulcv
+        # Liquid Bulk
+        - mrTanker
+        - aframax
+        - suezmax
+        - vlcc
+        # Dry Bulk
+        - handysize
+        - panamaxBulk
+        - capesize
+        # Specialized
+        - pctc
+        - lng
+      description: Specific vessel taxonomy class derived from AIS static dimensions and trade characteristics
+      example: "neoPanamax"
+
+    NotificationType:
+      type: string
+      enum:
+        - stateChange
+        - dailyDigest
+        - inApp
+      description: Category of user notification
+      example: "stateChange"
+
+    # ── Domain Models ──
+    Port:
+      type: object
+      required:
+        - id
+        - name
+        - locode
+        - country
+        - lat
+        - lon
+        - isDefault
+        - geofenceRadiusNm
+        - addedByUserId
+      properties:
+        id:
+          type: string
+          description: Unique port identifier
+          example: "port-rotterdam"
+        name:
+          type: string
+          description: Official port name
+          example: "Port of Rotterdam"
+        locode:
+          type: string
+          description: UN/LOCODE standard 5-character port code
+          pattern: '^[A-Z]{2}[A-Z0-9]{3}$'
+          example: "NLRTM"
+        country:
+          type: string
+          description: Country name
+          example: "Netherlands"
+        lat:
+          type: number
+          format: float
+          description: Latitude coordinate in decimal degrees (-90 to +90)
+          minimum: -90
+          maximum: 90
+          example: 51.9244
+        lon:
+          type: number
+          format: float
+          description: Longitude coordinate in decimal degrees (-180 to +180)
+          minimum: -180
+          maximum: 180
+          example: 4.4777
+        isDefault:
+          type: boolean
+          description: Whether this is a global default port or a user-added custom port
+          example: true
+        geofenceRadiusNm:
+          type: number
+          description: Configured geofence boundary radius in nautical miles
+          example: 8
+        addedByUserId:
+          type: string
+          nullable: true
+          description: User ID who added this custom port; null for global default ports
+          example: null
+
+    CreatePortRequest:
+      type: object
+      required:
+        - name
+        - locode
+        - country
+        - lat
+        - lon
+        - geofenceRadiusNm
+      properties:
+        name:
+          type: string
+          description: Port name
+          example: "Port of Antwerp-Bruges"
+        locode:
+          type: string
+          description: UN/LOCODE 5-character string
+          example: "BEANR"
+        country:
+          type: string
+          description: Country of location
+          example: "Belgium"
+        lat:
+          type: number
+          format: float
+          description: Latitude in decimal degrees
+          minimum: -90
+          maximum: 90
+          example: 51.3
+        lon:
+          type: number
+          format: float
+          description: Longitude in decimal degrees
+          minimum: -180
+          maximum: 180
+          example: 4.3
+        geofenceRadiusNm:
+          type: number
+          description: Geofence radius in nautical miles
+          minimum: 1
+          maximum: 50
+          example: 8
+
+    CongestionMetrics:
+      type: object
+      required:
+        - anchorageQueueCount
+        - avgWaitingTimeHours
+        - berthOccupancyPct
+        - rolling30dAvgQueue
+        - rolling30dAvgWaitHours
+      properties:
+        anchorageQueueCount:
+          type: integer
+          description: Number of active vessels in the anchorage queue
+          example: 18
+        avgWaitingTimeHours:
+          type: number
+          format: float
+          description: Average waiting time in anchorage in hours
+          example: 28.5
+        berthOccupancyPct:
+          type: number
+          format: float
+          description: Current berth occupancy percentage (0-100)
+          minimum: 0
+          maximum: 100
+          example: 82.0
+        rolling30dAvgQueue:
+          type: number
+          format: float
+          description: Historical rolling 30-day average queue count
+          example: 14.2
+        rolling30dAvgWaitHours:
+          type: number
+          format: float
+          description: Historical rolling 30-day average waiting time in hours
+          example: 22.1
+
+    TerminalMetrics:
+      type: object
+      required:
+        - berthTurnaroundHours
+        - berthToAnchorageWaitRatio
+        - dwellTimeAnomalyScore
+        - rolling30dAvgTurnaround
+      properties:
+        berthTurnaroundHours:
+          type: number
+          format: float
+          description: Average turnaround time at berth in hours
+          example: 36.4
+        berthToAnchorageWaitRatio:
+          type: number
+          format: float
+          description: Ratio of berth turnaround to anchorage waiting time
+          example: 1.28
+        dwellTimeAnomalyScore:
+          type: number
+          format: float
+          description: Container/cargo dwell time anomaly multiplier (>1.0 indicates anomaly)
+          example: 1.15
+        rolling30dAvgTurnaround:
+          type: number
+          format: float
+          description: Historical rolling 30-day average berth turnaround in hours
+          example: 32.0
+
+    WeatherMetrics:
+      type: object
+      required:
+        - windSpeedKnots
+        - waveHeightM
+        - swellPeriodSec
+        - visibilityNm
+        - gustSpeedKnots
+      properties:
+        windSpeedKnots:
+          type: number
+          format: float
+          description: Sustained wind speed in knots
+          example: 28.4
+        waveHeightM:
+          type: number
+          format: float
+          description: Significant wave height in meters
+          example: 2.3
+        swellPeriodSec:
+          type: number
+          format: float
+          description: Swell period in seconds
+          example: 8.5
+        visibilityNm:
+          type: number
+          format: float
+          description: Atmospheric visibility in nautical miles
+          example: 6.2
+        gustSpeedKnots:
+          type: number
+          format: float
+          description: Peak wind gust speed in knots
+          example: 35.1
+
+    NavigationalMetrics:
+      type: object
+      required:
+        - underKeelClearanceM
+        - channelDepthM
+        - airDraftClearanceM
+        - pilotageAvailable
+        - tideHeightM
+      properties:
+        underKeelClearanceM:
+          type: number
+          format: float
+          description: Current under-keel clearance in meters
+          example: 2.1
+        channelDepthM:
+          type: number
+          format: float
+          description: Channel navigation depth in meters
+          example: 16.5
+        airDraftClearanceM:
+          type: number
+          format: float
+          description: Vertical air draft clearance under bridges/cables in meters
+          example: 8.4
+        pilotageAvailable:
+          type: boolean
+          description: Harbor pilotage availability status
+          example: true
+        tideHeightM:
+          type: number
+          format: float
+          description: Current tidal height above chart datum in meters
+          example: 1.8
+
+    PortMetrics:
+      type: object
+      required:
+        - portId
+        - timestamp
+        - congestion
+        - terminal
+        - weather
+        - navigational
+      properties:
+        portId:
+          type: string
+          example: "port-rotterdam"
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-10-16T00:00:00Z"
+        congestion:
+          $ref: '#/components/schemas/CongestionMetrics'
+        terminal:
+          $ref: '#/components/schemas/TerminalMetrics'
+        weather:
+          $ref: '#/components/schemas/WeatherMetrics'
+        navigational:
+          $ref: '#/components/schemas/NavigationalMetrics'
+
+    SubRiskResult:
+      type: object
+      required:
+        - category
+        - tier
+        - score
+        - detail
+        - factors
+      properties:
+        category:
+          $ref: '#/components/schemas/SubRiskCategory'
+        tier:
+          $ref: '#/components/schemas/RiskTier'
+        score:
+          type: number
+          format: float
+          description: Numeric risk score (0-100)
+          minimum: 0
+          maximum: 100
+          example: 60.0
+        detail:
+          type: string
+          description: Operational summary of the sub-risk condition
+          example: "Elevated congestion above rolling baseline."
+        factors:
+          type: array
+          description: Specific statistical anomalies or breached thresholds contributing to tiering
+          items:
+            type: string
+          example:
+            - "Anchorage queue 18 vs 14.2 avg (ratio 1.27)"
+            - "Avg wait 28.5h vs 22.1h avg (ratio 1.29)"
+            - "Berth occupancy at 82%"
+
+    RiskAssessment:
+      type: object
+      required:
+        - id
+        - portId
+        - portName
+        - vesselClass
+        - vesselClassLabel
+        - timestamp
+        - compositeTier
+        - compositeScore
+        - subRisks
+        - metrics
+      properties:
+        id:
+          type: string
+          description: Unique risk assessment evaluation ID
+          example: "risk-rotterdam-neoPanamax-1729036800"
+        portId:
+          type: string
+          description: Monitored port ID
+          example: "port-rotterdam"
+        portName:
+          type: string
+          description: Port name
+          example: "Port of Rotterdam"
+        vesselClass:
+          $ref: '#/components/schemas/VesselClass'
+        vesselClassLabel:
+          type: string
+          description: Human-readable vessel class label
+          example: "Neo-Panamax"
+        timestamp:
+          type: string
+          format: date-time
+          description: Timestamp when risk was assessed
+          example: "2026-10-16T00:00:00Z"
+        compositeTier:
+          $ref: '#/components/schemas/RiskTier'
+        compositeScore:
+          type: number
+          format: float
+          description: Overall composite score determined by the weakest-link rule
+          minimum: 0
+          maximum: 100
+          example: 60.0
+        subRisks:
+          type: object
+          required:
+            - congestion
+            - terminalDelays
+            - weather
+            - navigational
+          description: Sub-risk evaluation dictionary
+          properties:
+            congestion:
+              $ref: '#/components/schemas/SubRiskResult'
+            terminalDelays:
+              $ref: '#/components/schemas/SubRiskResult'
+            weather:
+              $ref: '#/components/schemas/SubRiskResult'
+            navigational:
+              $ref: '#/components/schemas/SubRiskResult'
+        metrics:
+          $ref: '#/components/schemas/PortMetrics'
+
+    BulkRiskAssessmentRequest:
+      type: object
+      required:
+        - ports
+        - vesselClass
+      properties:
+        ports:
+          type: array
+          description: Array of ports to evaluate
+          items:
+            type: object
+            required:
+              - id
+              - name
+            properties:
+              id:
+                type: string
+                example: "port-rotterdam"
+              name:
+                type: string
+                example: "Port of Rotterdam"
+        vesselClass:
+          $ref: '#/components/schemas/VesselClass'
+
+    Notification:
+      type: object
+      required:
+        - id
+        - type
+        - portId
+        - portName
+        - title
+        - message
+        - tier
+        - timestamp
+        - read
+      properties:
+        id:
+          type: string
+          description: Unique notification ID
+          example: "notif-1729036800-abc123"
+        type:
+          $ref: '#/components/schemas/NotificationType'
+        portId:
+          type: string
+          description: Port associated with notification
+          example: "port-rotterdam"
+        portName:
+          type: string
+          description: Port name
+          example: "Port of Rotterdam"
+        title:
+          type: string
+          description: Alert title
+          example: "Port of Rotterdam: Risk tier changed to High"
+        message:
+          type: string
+          description: Detailed notification description
+          example: "Port of Rotterdam risk status shifted from Medium to High."
+        tier:
+          $ref: '#/components/schemas/RiskTier'
+        previousTier:
+          allOf:
+            - $ref: '#/components/schemas/RiskTier'
+          nullable: true
+          description: Previous risk tier before transition; null for initial evaluations
+          example: "medium"
+        timestamp:
+          type: string
+          format: date-time
+          description: Creation timestamp
+          example: "2026-10-16T00:00:00Z"
+        read:
+          type: boolean
+          description: Read status flag
+          example: false
+
+    CreateAlertRequest:
+      type: object
+      required:
+        - portId
+        - portName
+        - newTier
+      properties:
+        portId:
+          type: string
+          description: Port identifier
+          example: "port-rotterdam"
+        portName:
+          type: string
+          description: Name of the port
+          example: "Port of Rotterdam"
+        newTier:
+          $ref: '#/components/schemas/RiskTier'
+        previousTier:
+          allOf:
+            - $ref: '#/components/schemas/RiskTier'
+          nullable: true
+          description: Previous risk tier
+          example: "medium"
+
+    ErrorResponse:
+      type: object
+      required:
+        - detail
+      properties:
+        detail:
+          type: string
+          description: Human-readable error message
+          example: "Port not found or access denied."
+        code:
+          type: string
+          description: Machine-readable application error code
+          example: "NOT_FOUND"
