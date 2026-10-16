@@ -5,7 +5,7 @@ from typing import Optional, Tuple
 from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
-from app.models.risk import CongestionMetrics, NavigationalMetrics, TerminalMetrics, WeatherMetrics
+from app.models.risk import CongestionMetrics, NavigationalMetrics, WeatherMetrics
 
 
 class ExternalWeatherCache(Base):
@@ -54,7 +54,7 @@ class ExternalWeatherCache(Base):
 
 
 class ExternalAISTrafficCache(Base):
-    """Persisted external vessel traffic metrics from AISStream with fetched_at timestamp."""
+    """Persisted external vessel traffic metrics from AISStream and NGA World Port Index with fetched_at timestamp."""
 
     __tablename__ = "external_ais_traffic_cache"
 
@@ -63,25 +63,24 @@ class ExternalAISTrafficCache(Base):
     locode: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
     vessel_class: Mapped[str] = mapped_column(String(50), nullable=False)
 
-    # Congestion Metrics
+    # Congestion Metrics (Live AISStream)
     anchorage_queue_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    avg_waiting_time_hours: Mapped[float] = mapped_column(Float, nullable=False)
-    berth_occupancy_pct: Mapped[float] = mapped_column(Float, nullable=False)
+    active_vessel_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    moving_vessel_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     rolling_30d_avg_queue: Mapped[float] = mapped_column(Float, nullable=False)
-    rolling_30d_avg_wait_hours: Mapped[float] = mapped_column(Float, nullable=False)
 
-    # Terminal Metrics
-    berth_turnaround_hours: Mapped[float] = mapped_column(Float, nullable=False)
-    berth_to_anchorage_wait_ratio: Mapped[float] = mapped_column(Float, nullable=False)
-    dwell_time_anomaly_score: Mapped[float] = mapped_column(Float, nullable=False)
-    rolling_30d_avg_turnaround: Mapped[float] = mapped_column(Float, nullable=False)
-
-    # Navigational Metrics
+    # Navigational Metrics (NGA World Port Index Pub 150 + Vessel Draft)
     under_keel_clearance_m: Mapped[float] = mapped_column(Float, nullable=False)
     channel_depth_m: Mapped[float] = mapped_column(Float, nullable=False)
-    air_draft_clearance_m: Mapped[float] = mapped_column(Float, nullable=False)
+    cargo_pier_depth_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    anchorage_depth_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    vessel_draft_m: Mapped[float] = mapped_column(Float, default=12.0, nullable=False)
+    overhead_limits: Mapped[str] = mapped_column(String(20), default="Unknown", nullable=False)
     pilotage_available: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    tugs_assistance: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     tide_height_m: Mapped[float] = mapped_column(Float, nullable=False)
+    harbor_size: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    shelter_afforded: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
     source: Mapped[str] = mapped_column(String(50), default="aisstream", nullable=False)
     fetched_at: Mapped[datetime] = mapped_column(
@@ -103,26 +102,26 @@ class ExternalAISTrafficCache(Base):
             fetched = fetched.replace(tzinfo=timezone.utc)
         return (now - fetched).total_seconds() < max_age_seconds
 
-    def to_pydantic(self) -> Tuple[CongestionMetrics, TerminalMetrics, NavigationalMetrics]:
+    def to_pydantic(self) -> Tuple[CongestionMetrics, NavigationalMetrics]:
         """Convert database record to tuple of Pydantic metric models."""
         congestion = CongestionMetrics(
             anchorageQueueCount=self.anchorage_queue_count,
-            avgWaitingTimeHours=self.avg_waiting_time_hours,
-            berthOccupancyPct=self.berth_occupancy_pct,
+            activeVesselCount=self.active_vessel_count,
+            movingVesselCount=self.moving_vessel_count,
             rolling30dAvgQueue=self.rolling_30d_avg_queue,
-            rolling30dAvgWaitHours=self.rolling_30d_avg_wait_hours,
-        )
-        terminal = TerminalMetrics(
-            berthTurnaroundHours=self.berth_turnaround_hours,
-            berthToAnchorageWaitRatio=self.berth_to_anchorage_wait_ratio,
-            dwellTimeAnomalyScore=self.dwell_time_anomaly_score,
-            rolling30dAvgTurnaround=self.rolling_30d_avg_turnaround,
         )
         navigational = NavigationalMetrics(
             underKeelClearanceM=self.under_keel_clearance_m,
             channelDepthM=self.channel_depth_m,
-            airDraftClearanceM=self.air_draft_clearance_m,
+            cargoPierDepthM=self.cargo_pier_depth_m,
+            anchorageDepthM=self.anchorage_depth_m,
+            vesselDraftM=self.vessel_draft_m,
+            overheadLimits=self.overhead_limits,
             pilotageAvailable=self.pilotage_available,
+            tugsAssistance=self.tugs_assistance,
             tideHeightM=self.tide_height_m,
+            harborSize=self.harbor_size,
+            shelterAfforded=self.shelter_afforded,
         )
-        return congestion, terminal, navigational
+        return congestion, navigational
+

@@ -6,10 +6,10 @@ RiskTier = Literal["low", "medium", "high"]
 
 SubRiskCategory = Literal[
     "congestion",
-    "terminalDelays",
     "weather",
     "navigational",
 ]
+
 
 VesselSector = Literal[
     "containerized",

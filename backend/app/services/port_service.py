@@ -21,6 +21,30 @@ class PortService:
         for p in self.directory_client.get_default_ports():
             self._default_ports[p.id] = p
 
+    def _enrich_with_wpi(self, port: Port) -> Port:
+        """Enrich a user-monitored Port with NGA World Port Index hydrographic fields if available in UN/LOCODE DB."""
+        if port.channelDepthM is not None:
+            return port
+        ref = self.directory_client.get_port_by_locode(port.locode)
+        if not ref:
+            return port
+        return port.model_copy(
+            update={
+                "channelDepthM": ref.channelDepthM,
+                "cargoPierDepthM": ref.cargoPierDepthM,
+                "anchorageDepthM": ref.anchorageDepthM,
+                "oilTerminalDepthM": ref.oilTerminalDepthM,
+                "lngTerminalDepthM": ref.lngTerminalDepthM,
+                "maxVesselDraftM": ref.maxVesselDraftM,
+                "tidalRangeM": ref.tidalRangeM,
+                "overheadLimits": ref.overheadLimits,
+                "pilotageAvailable": ref.pilotageAvailable,
+                "tugsAssistance": ref.tugsAssistance,
+                "harborSize": ref.harborSize,
+                "shelterAfforded": ref.shelterAfforded,
+            }
+        )
+
     async def get_ports(self, user_id: str) -> List[Port]:
         """Return ports monitored by this user from the database."""
         with get_db_context() as db:
@@ -30,7 +54,7 @@ class PortService:
                 .order_by(MonitoredPort.created_at.asc())
                 .all()
             )
-            return [r.to_pydantic() for r in records]
+            return [self._enrich_with_wpi(r.to_pydantic()) for r in records]
 
     async def get_default_ports(self) -> List[Port]:
         """Return only default global ports from the UN/LOCODE database."""
@@ -50,7 +74,7 @@ class PortService:
                     .first()
                 )
                 if user_port:
-                    return user_port.to_pydantic()
+                    return self._enrich_with_wpi(user_port.to_pydantic())
 
         if port_id in self._default_ports:
             return self._default_ports[port_id]

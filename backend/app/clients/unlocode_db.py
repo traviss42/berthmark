@@ -74,9 +74,27 @@ class UnlocodeDatabase:
         conn.row_factory = sqlite3.Row
         return conn
 
+    LEGACY_ID_ALIASES = {
+        "port-rotterdam": "NLRTM",
+        "port-singapore": "SGKEP",
+        "port-hamburg": "DEHAM",
+        "port-los-angeles": "USLAX",
+        "port-antwerp": "BEANR",
+        "port-tokyo": "JPTYO",
+        "port-vancouver": "CAVAN",
+        "port-new-york": "USNYC",
+        "port-shanghai": "CNSGH",
+    }
+
     def init_db(self) -> None:
-        """Create port tables and search indexes."""
+        """Create port tables and search indexes, migrating schema if WPI columns are missing."""
         with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(unlocode_ports);")
+            existing_cols = {row["name"] for row in cursor.fetchall()}
+            if existing_cols and "channel_depth_m" not in existing_cols:
+                conn.execute("DROP TABLE IF EXISTS unlocode_ports;")
+
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS unlocode_ports (
@@ -88,7 +106,19 @@ class UnlocodeDatabase:
                     lon REAL NOT NULL,
                     is_default INTEGER NOT NULL DEFAULT 0,
                     geofence_radius_nm REAL NOT NULL DEFAULT 8.0,
-                    added_by_user_id TEXT
+                    added_by_user_id TEXT,
+                    channel_depth_m REAL,
+                    cargo_pier_depth_m REAL,
+                    anchorage_depth_m REAL,
+                    oil_terminal_depth_m REAL,
+                    lng_terminal_depth_m REAL,
+                    max_vessel_draft_m REAL,
+                    tidal_range_m REAL,
+                    overhead_limits TEXT,
+                    pilotage_available TEXT,
+                    tugs_assistance TEXT,
+                    harbor_size TEXT,
+                    shelter_afforded TEXT
                 );
                 """
             )
@@ -131,6 +161,18 @@ class UnlocodeDatabase:
                 1 if p.isDefault else 0,
                 p.geofenceRadiusNm,
                 p.addedByUserId,
+                p.channelDepthM,
+                p.cargoPierDepthM,
+                p.anchorageDepthM,
+                p.oilTerminalDepthM,
+                p.lngTerminalDepthM,
+                p.maxVesselDraftM,
+                p.tidalRangeM,
+                p.overheadLimits,
+                1 if p.pilotageAvailable is True else (0 if p.pilotageAvailable is False else None),
+                1 if p.tugsAssistance is True else (0 if p.tugsAssistance is False else None),
+                p.harborSize,
+                p.shelterAfforded,
             )
             for p in ports
         ]
@@ -138,8 +180,11 @@ class UnlocodeDatabase:
             conn.executemany(
                 """
                 INSERT OR REPLACE INTO unlocode_ports (
-                    id, name, locode, country, lat, lon, is_default, geofence_radius_nm, added_by_user_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    id, name, locode, country, lat, lon, is_default, geofence_radius_nm, added_by_user_id,
+                    channel_depth_m, cargo_pier_depth_m, anchorage_depth_m, oil_terminal_depth_m,
+                    lng_terminal_depth_m, max_vessel_draft_m, tidal_range_m, overhead_limits,
+                    pilotage_available, tugs_assistance, harbor_size, shelter_afforded
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 records,
             )
@@ -147,7 +192,7 @@ class UnlocodeDatabase:
 
     def get_port_by_locode(self, locode: str) -> Optional[Port]:
         """Fetch port by 5-character LOCODE."""
-        clean_locode = locode.upper().strip()
+        clean_locode = locode.upper().strip().replace(" ", "")
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -170,6 +215,14 @@ class UnlocodeDatabase:
             row = cursor.fetchone()
             if row:
                 return self._row_to_port(row)
+
+        alias_locode = self.LEGACY_ID_ALIASES.get(port_id.lower().strip())
+        if alias_locode:
+            return self.get_port_by_locode(alias_locode)
+
+        if port_id.lower().startswith("port-") and len(port_id) == 10:
+            return self.get_port_by_locode(port_id[5:].upper())
+
         return None
 
     def get_default_ports(self) -> List[Port]:
@@ -231,6 +284,20 @@ class UnlocodeDatabase:
             rows = cursor.fetchall()
             return [self._row_to_port(r) for r in rows]
 
+    @staticmethod
+    def _to_optional_bool(val: object) -> Optional[bool]:
+        if val is None:
+            return None
+        if isinstance(val, bool):
+            return val
+        if isinstance(val, (int, float)):
+            return bool(val)
+        s = str(val).strip().lower()
+        if s in ("1", "true", "yes"):
+            return True
+        if s in ("0", "false", "no"):
+            return False
+        return True
 
     def _row_to_port(self, row: sqlite3.Row) -> Port:
         return Port(
@@ -243,4 +310,16 @@ class UnlocodeDatabase:
             isDefault=bool(row["is_default"]),
             geofenceRadiusNm=row["geofence_radius_nm"],
             addedByUserId=row["added_by_user_id"],
+            channelDepthM=row["channel_depth_m"],
+            cargoPierDepthM=row["cargo_pier_depth_m"],
+            anchorageDepthM=row["anchorage_depth_m"],
+            oilTerminalDepthM=row["oil_terminal_depth_m"],
+            lngTerminalDepthM=row["lng_terminal_depth_m"],
+            maxVesselDraftM=row["max_vessel_draft_m"],
+            tidalRangeM=row["tidal_range_m"],
+            overheadLimits=row["overhead_limits"],
+            pilotageAvailable=self._to_optional_bool(row["pilotage_available"]),
+            tugsAssistance=self._to_optional_bool(row["tugs_assistance"]),
+            harborSize=row["harbor_size"],
+            shelterAfforded=row["shelter_afforded"],
         )

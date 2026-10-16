@@ -4,7 +4,6 @@ export type RiskTier = 'low' | 'medium' | 'high';
 
 export type SubRiskCategory =
   | 'congestion'
-  | 'terminalDelays'
   | 'weather'
   | 'navigational';
 
@@ -52,21 +51,25 @@ export interface Port {
   geofenceRadiusNm: number;
   addedByUserId: string | null;
   notificationsEnabled?: boolean;
+  channelDepthM?: number | null;
+  cargoPierDepthM?: number | null;
+  anchorageDepthM?: number | null;
+  oilTerminalDepthM?: number | null;
+  lngTerminalDepthM?: number | null;
+  maxVesselDraftM?: number | null;
+  tidalRangeM?: number | null;
+  overheadLimits?: string | null;
+  pilotageAvailable?: boolean | null;
+  tugsAssistance?: boolean | null;
+  harborSize?: string | null;
+  shelterAfforded?: string | null;
 }
 
 export interface CongestionMetrics {
   anchorageQueueCount: number;
-  avgWaitingTimeHours: number;
-  berthOccupancyPct: number;
+  activeVesselCount: number;
+  movingVesselCount: number;
   rolling30dAvgQueue: number;
-  rolling30dAvgWaitHours: number;
-}
-
-export interface TerminalMetrics {
-  berthTurnaroundHours: number;
-  berthToAnchorageWaitRatio: number;
-  dwellTimeAnomalyScore: number;
-  rolling30dAvgTurnaround: number;
 }
 
 export interface WeatherMetrics {
@@ -80,16 +83,21 @@ export interface WeatherMetrics {
 export interface NavigationalMetrics {
   underKeelClearanceM: number;
   channelDepthM: number;
-  airDraftClearanceM: number;
+  cargoPierDepthM?: number | null;
+  anchorageDepthM?: number | null;
+  vesselDraftM: number;
+  overheadLimits: string;
   pilotageAvailable: boolean;
+  tugsAssistance: boolean;
   tideHeightM: number;
+  harborSize?: string | null;
+  shelterAfforded?: string | null;
 }
 
 export interface PortMetrics {
   portId: string;
   timestamp: string;
   congestion: CongestionMetrics;
-  terminal: TerminalMetrics;
   weather: WeatherMetrics;
   navigational: NavigationalMetrics;
 }
@@ -146,16 +154,8 @@ export interface AuthResponse {
 export interface RiskThresholds {
   congestion: {
     queueAnomalyRatio: number;
-    waitAnomalyRatio: number;
-    berthOccupancyHighPct: number;
-    berthOccupancyMediumPct: number;
-  };
-  terminal: {
-    turnaroundAnomalyRatio: number;
-    waitRatioHigh: number;
-    waitRatioMedium: number;
-    dwellAnomalyHigh: number;
-    dwellAnomalyMedium: number;
+    queueHighCount: number;
+    queueMediumCount: number;
   };
   weather: {
     windHighKnots: number;
@@ -168,7 +168,6 @@ export interface RiskThresholds {
   navigational: {
     ukcHighM: number;
     ukcMediumM: number;
-    airDraftClearanceLowM: number;
-    airDraftClearanceMediumM: number;
   };
 }
+

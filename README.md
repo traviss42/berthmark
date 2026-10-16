@@ -39,7 +39,7 @@ Built to comply with international maritime guidelines (**PIANC Report 121**) an
   - **Demo Account Protection:** When logged in with a demo account (e.g., `@pacific-shipping.com`, `@rotterdam-logistics.nl`, `@globalmaritime.org`, `@example.com`), real outbound SMTP emails are automatically suppressed to prevent bounces, and an in-app notice is displayed in the UI.
 
 - **User-Driven Port Portfolio:**
-  - Users curate their own portfolio by searching the **11,825** global maritime ports in the UN/LOCODE database that have Function Code `1` (*Maritime transport*) and valid geographical coordinates.
+  - Users curate their own portfolio by searching the **2,477** global maritime ports matched across both the official UN/LOCODE dataset (`Function = 1` *Maritime transport*) and the NGA World Port Index (`UpdatedPub150.csv`) that have verified channel depth (`Channel Depth (m) > 0`) and valid geographical coordinates in at least one dataset.
   - Track any port with custom geofence radii.
   - Easily remove any port from monitoring with a single click directly from the list or detail view.
 
@@ -50,11 +50,10 @@ Built to comply with international maritime guidelines (**PIANC Report 121**) an
     - **Dry Bulk:** Handysize / Supramax, Panamax (Bulk), Capesize.
     - **Specialized:** PCC / PCTC (Car Carriers), LNG / LPG Carriers.
 
-- **Multi-Factor Risk Engine & Weakest-Link Rule:**
-  - **Congestion Risk:** Active anchorage queues and waiting times evaluated against rolling 30-day baselines alongside berth occupancy percentages.
-  - **Terminal Delays:** Turnaround times, berth-to-anchorage wait ratios, and dwell time anomalies.
-  - **Marine Weather:** Real-time wind speed, peak gusts, significant wave height, swell period, and visibility.
-  - **Navigational Safety:** Dynamic Under-Keel Clearance (UKC), channel navigation depth, air draft clearance under bridges, harbor pilot availability, and tidal elevation.
+- **Multi-Factor Risk Engine & Weakest-Link Rule (Zero Simulated Fallbacks):**
+  - **Congestion Risk:** Active anchorage queues and waiting times evaluated from live AISStream geofence vessel traffic against rolling 30-day persisted baselines alongside berth occupancy percentages.
+  - **Marine Weather:** Real-time wind speed, peak gusts, significant wave height, swell wave period (`swell_wave_period` / `wave_period`), and horizontal visibility (`visibility` in NM) fetched directly from Open-Meteo Marine & Forecast APIs.
+  - **Navigational Safety:** Dynamic Under-Keel Clearance (UKC) computed from real NGA World Port Index (Pub 150) hydrographic depths (`channelDepthM`, `cargoPierDepthM`, `anchorageDepthM`, `oilTerminalDepthM`, `lngTerminalDepthM`) minus vessel class design draft, alongside overhead limits, pilotage availability, tug assistance, harbor size, shelter afforded, and tidal range.
   - **Weakest-Link Composite Rule:** Any single sub-risk reaching **High** severity automatically elevates the port's composite status to **High**, preventing critical hazards from being masked by average scores.
 
 - **State Transition Alerts & Notification Feed:**
@@ -82,7 +81,7 @@ Built to comply with international maritime guidelines (**PIANC Report 121**) an
        ▼                       ▼
 ┌──────────────┐    ┌────────────────────┐    ┌───────────────┐
 │  SQLAlchemy  │    │    Open-Meteo      │    │   AISStream   │
-│ Database URL │    │  Marine & Forecast │    │   WebSocket   │
+│UN/LOCODE+WPI │    │  Marine & Forecast │    │   WebSocket   │
 │(SQLite / PG) │    │   (Live Weather)   │    │(Live AIS/MMSI)│
 └──────────────┘    └────────────────────┘    └───────────────┘
 ```
@@ -98,12 +97,12 @@ Built to comply with international maritime guidelines (**PIANC Report 121**) an
 
 ## Real Data Sources & Multi-Tier Caching
 
-Berthmark does not rely on mock databases; it connects directly to live maritime services:
+Berthmark never uses fabricated or simulated fallback data; it relies strictly on verified maritime datasets and live external telemetry:
 
-1. **UN/LOCODE Maritime Database (SQLite):**
-   - High-performance local SQLite database (`backend/data/unlocode.db`) populated from the official UN/LOCODE dataset, filtered strictly for maritime ports (`Function = 1`) that have valid geographical coordinates.
+1. **Combined UN/LOCODE + NGA World Port Index (Pub 150) Maritime Database (SQLite):**
+   - Local SQLite database (`backend/data/unlocode.db`) populated from the intersection of the official UN/LOCODE dataset (`Function = 1`) and the NGA World Port Index (`UpdatedPub150.csv`), retaining only ports with real channel depth (`Channel Depth (m) > 0`) and valid coordinates in at least one of the two datasets (**2,477** ports).
 2. **Open-Meteo Marine & Atmospheric Weather API:**
-   - Real-time wave height, wind speed, gust velocity, and swell period fetched directly from Open-Meteo endpoints.
+   - Real-time significant wave height, swell wave period, wind speed, gust velocity, and horizontal visibility (converted from meters to nautical miles) fetched directly from Open-Meteo endpoints.
 3. **AISStream Live Vessel Traffic (WebSocket API):**
    - Direct WebSocket streaming (`wss://stream.aisstream.io/v0/stream`) sampling real-time AIS vessel position reports and ship static data within dynamic port geofence bounding boxes.
 
@@ -171,7 +170,7 @@ SMTP_PASSWORD=
 SMTP_FROM=alerts@berthmark.com
 ```
 
-*(If `AISSTREAM_API_KEY` is left blank, the application will automatically fall back to deterministic vessel traffic models without crashing).*
+*(Requires a valid `AISSTREAM_API_KEY` from [aisstream.io](https://aisstream.io) for live geofence vessel streaming).*
 
 ### 3. One-Command Setup
 
@@ -411,29 +410,22 @@ berthmark/
 
 ---
 
-## UN/LOCODE Data Management & Port Coverage
+## UN/LOCODE & NGA World Port Index Data Management
 
-UN/ECE distributes the UN/LOCODE dataset (`code-list.csv`, `country-codes.csv`, and `function-classifiers.csv`). Berthmark populates `backend/data/unlocode.db` directly from the official UN/LOCODE dataset using two strict criteria:
+Berthmark populates `backend/data/unlocode.db` directly by combining the official **UN/LOCODE** dataset (`code-list.csv`, `country-codes.csv`, `function-classifiers.csv`) with the **NGA World Port Index** (`UpdatedPub150.csv`) using strict real-data criteria:
 
-1. **Function Code `1` (*Maritime transport — sea port or maritime port*):** Only locations whose `Function` classifier (`row[7]`) includes code `1` per [`function-classifiers.csv`](https://raw.githubusercontent.com/datasets/un-locode/refs/heads/main/data/function-classifiers.csv) are considered maritime ports (**17,607** global entries out of ~116,000 total UN/LOCODE locations).
-2. **Valid Geographical Coordinates Present:** The entry must contain valid UNECE degree-minute coordinates (`DDMM[N/S] DDDMM[E/W]`) in the `Coordinates` column (`row[10]`). Because `aisstream.io` WebSocket subscriptions and Open-Meteo marine weather queries require a latitude/longitude bounding box around the port, entries lacking coordinates in UN/LOCODE are skipped without guessing or fabricating fallback coordinates (**11,825** unique maritime ports with valid coordinates are imported).
+1. **Both Datasets Present (`UN/LOCODE Function = 1` ∩ `NGA World Port Index`):** Only locations whose UN/LOCODE `Function` classifier (`row[7]`) includes code `1` (*Maritime transport — sea port or maritime port*) **and** that have a matching 5-character `UN/LOCODE` entry in `UpdatedPub150.csv` are included.
+2. **Real Channel Depth Required (`Channel Depth (m) > 0`):** The NGA World Port Index entry must have a verified positive `Channel Depth (m)` (`row[17] > 0`). All real hydrographic and navigational fields (`channelDepthM`, `cargoPierDepthM`, `anchorageDepthM`, `oilTerminalDepthM`, `lngTerminalDepthM`, `maxVesselDraftM`, `tidalRangeM`, `harborSize`, `shelterAfforded`, `overheadLimits`, `pilotageCompulsory`, `pilotageAvailable`, `tugsAssistance`) are imported directly into `unlocode.db`.
+3. **Single-Dataset Coordinate Rule:** Valid geographical coordinates are required in **at least one** of the two datasets. Coordinates are taken from UN/LOCODE (`DDMM[N/S] DDDMM[E/W]`) when present, or from NGA World Port Index (`Latitude` `row[107]` and `Longitude` `row[108]`) when UN/LOCODE coordinates are blank. This recovers major global ports (including Vancouver `CAVAN`, Montreal `CAMTR`, Halifax `CAHAL`, and Prince Rupert `CAPRR`) whose coordinates are missing in UNECE's CSV but present in NGA Pub 150, yielding **2,477** verified maritime ports.
 
-### Why Some Ports (Including Many in Japan and Canada) Were Missing
-
-1. **Previous Static Seed Limitation:** Earlier versions initialized `unlocode.db` from a small 44-port static file (`backend/data/maritime_ports.json`) via `make seed-db`, which included zero Japanese ports and only a single Canadian port. Running `make import-unlocode` (or `make install`) now imports directly from the full UN/LOCODE dataset.
-2. **Missing Coordinates in Official UN/LOCODE Releases:** In the official UN/LOCODE `code-list.csv` dataset, **5,716 out of 17,607** maritime (`Function = 1`) port entries have an empty `Coordinates` column:
-   - **Japan (`JP`):** Out of 1,562 maritime port rows, **113** have coordinates in UN/LOCODE (including Tokyo `JPTYO`, Yokohama `JPYOK`, Osaka `JPOSA`, Kobe `JPUKB`, and Nagoya `JPNGO`) and are available in Berthmark, while **1,449** have blank coordinates in UN/LOCODE and are excluded.
-   - **Canada (`CA`):** Out of 580 maritime port rows, **327** have coordinates in UN/LOCODE (such as Victoria `CAVIC`, Argentia `CANWP`, Port Weller `CAPWE`, Port Elgin `CAPEL`, and Port McNeill `CAPMA`) and are available in Berthmark, while **253** have blank coordinates in UNECE's dataset (including `CAMTR` Montreal, `CAHAL` Halifax, `CAVAN` Vancouver, and `CAPRR` Prince Rupert) and are excluded.
-
-### Importing or Refreshing the UN/LOCODE Database
+### Importing or Refreshing the Port Database
 
 ```bash
-# Fetch and import directly from the official UN/LOCODE repository (11,825 maritime ports with coordinates):
+# Fetch and import directly from the official UN/LOCODE + NGA World Port Index repositories (2,477 matched maritime ports):
 make import-unlocode
 
-# Or import from a local UNECE CSV file or directory:
-backend/.venv/bin/python backend/scripts/import_unlocode.py --csv path/to/code-list.csv
-backend/.venv/bin/python backend/scripts/import_unlocode.py --dir path/to/csv_parts/
+# Or import from local UNECE and NGA WPI CSV files:
+backend/.venv/bin/python backend/scripts/import_unlocode.py --csv path/to/code-list.csv --wpi-csv path/to/UpdatedPub150.csv
 ```
 
 ---

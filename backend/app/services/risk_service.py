@@ -33,26 +33,26 @@ VESSEL_CLASS_METADATA: Dict[VesselClass, Dict[str, str]] = {
 
 # PIANC Guidelines (Report 121) thresholds
 VESSEL_CLASS_THRESHOLDS: Dict[VesselClass, Dict[str, float]] = {
-    "feeder": {"windHighKnots": 45, "windMediumKnots": 30, "ukcHighM": 1.0, "ukcMediumM": 2.0, "airDraftLowM": 2.0, "airDraftMediumM": 5.0},
-    "panamax": {"windHighKnots": 40, "windMediumKnots": 28, "ukcHighM": 1.2, "ukcMediumM": 2.5, "airDraftLowM": 3.0, "airDraftMediumM": 6.0},
-    "neoPanamax": {"windHighKnots": 35, "windMediumKnots": 25, "ukcHighM": 1.5, "ukcMediumM": 3.0, "airDraftLowM": 4.0, "airDraftMediumM": 8.0},
-    "ulcv": {"windHighKnots": 28, "windMediumKnots": 20, "ukcHighM": 2.0, "ukcMediumM": 3.5, "airDraftLowM": 5.0, "airDraftMediumM": 10.0},
-    "mrTanker": {"windHighKnots": 45, "windMediumKnots": 30, "ukcHighM": 1.0, "ukcMediumM": 2.0, "airDraftLowM": 2.0, "airDraftMediumM": 5.0},
-    "aframax": {"windHighKnots": 40, "windMediumKnots": 28, "ukcHighM": 1.5, "ukcMediumM": 2.5, "airDraftLowM": 3.0, "airDraftMediumM": 6.0},
-    "suezmax": {"windHighKnots": 38, "windMediumKnots": 25, "ukcHighM": 1.8, "ukcMediumM": 3.0, "airDraftLowM": 4.0, "airDraftMediumM": 7.0},
-    "vlcc": {"windHighKnots": 35, "windMediumKnots": 22, "ukcHighM": 2.5, "ukcMediumM": 4.0, "airDraftLowM": 5.0, "airDraftMediumM": 10.0},
-    "handysize": {"windHighKnots": 45, "windMediumKnots": 30, "ukcHighM": 1.0, "ukcMediumM": 2.0, "airDraftLowM": 2.0, "airDraftMediumM": 5.0},
-    "panamaxBulk": {"windHighKnots": 40, "windMediumKnots": 28, "ukcHighM": 1.5, "ukcMediumM": 2.5, "airDraftLowM": 3.0, "airDraftMediumM": 6.0},
-    "capesize": {"windHighKnots": 35, "windMediumKnots": 25, "ukcHighM": 2.0, "ukcMediumM": 3.5, "airDraftLowM": 4.0, "airDraftMediumM": 8.0},
-    "pctc": {"windHighKnots": 25, "windMediumKnots": 18, "ukcHighM": 1.5, "ukcMediumM": 2.5, "airDraftLowM": 5.0, "airDraftMediumM": 10.0},
-    "lng": {"windHighKnots": 30, "windMediumKnots": 22, "ukcHighM": 2.0, "ukcMediumM": 3.0, "airDraftLowM": 5.0, "airDraftMediumM": 10.0},
+    "feeder": {"windHighKnots": 45, "windMediumKnots": 30, "ukcHighM": 0.5, "ukcMediumM": 1.5},
+    "panamax": {"windHighKnots": 40, "windMediumKnots": 28, "ukcHighM": 0.8, "ukcMediumM": 2.0},
+    "neoPanamax": {"windHighKnots": 35, "windMediumKnots": 25, "ukcHighM": 1.0, "ukcMediumM": 2.5},
+    "ulcv": {"windHighKnots": 28, "windMediumKnots": 20, "ukcHighM": 1.5, "ukcMediumM": 3.0},
+    "mrTanker": {"windHighKnots": 45, "windMediumKnots": 30, "ukcHighM": 0.5, "ukcMediumM": 1.5},
+    "aframax": {"windHighKnots": 40, "windMediumKnots": 28, "ukcHighM": 1.0, "ukcMediumM": 2.0},
+    "suezmax": {"windHighKnots": 38, "windMediumKnots": 25, "ukcHighM": 1.2, "ukcMediumM": 2.5},
+    "vlcc": {"windHighKnots": 35, "windMediumKnots": 22, "ukcHighM": 1.8, "ukcMediumM": 3.5},
+    "handysize": {"windHighKnots": 45, "windMediumKnots": 30, "ukcHighM": 0.5, "ukcMediumM": 1.5},
+    "panamaxBulk": {"windHighKnots": 40, "windMediumKnots": 28, "ukcHighM": 1.0, "ukcMediumM": 2.0},
+    "capesize": {"windHighKnots": 35, "windMediumKnots": 25, "ukcHighM": 1.5, "ukcMediumM": 3.0},
+    "pctc": {"windHighKnots": 25, "windMediumKnots": 18, "ukcHighM": 1.0, "ukcMediumM": 2.0},
+    "lng": {"windHighKnots": 30, "windMediumKnots": 22, "ukcHighM": 1.2, "ukcMediumM": 2.5},
 }
 
 TIER_SCORES: Dict[RiskTier, float] = {"low": 25.0, "medium": 60.0, "high": 90.0}
 
 
 class RiskService:
-    """Service for computing and aggregating port-call risk."""
+    """Service for computing and aggregating port-call risk across live traffic, weather, and NGA WPI hydrography."""
 
     def __init__(
         self,
@@ -76,80 +76,28 @@ class RiskService:
             if c.rolling30dAvgQueue > 0
             else 1.0
         )
-        wait_ratio = (
-            c.avgWaitingTimeHours / c.rolling30dAvgWaitHours
-            if c.rolling30dAvgWaitHours > 0
-            else 1.0
-        )
 
         tier: RiskTier = "low"
-        detail = "Normal congestion levels relative to 30-day baseline."
+        detail = "Normal vessel traffic relative to rolling historical baseline."
 
-        if queue_ratio >= 1.5 or wait_ratio >= 1.5 or c.berthOccupancyPct >= 90:
+        if queue_ratio >= 1.5 or c.anchorageQueueCount >= 25:
             tier = "high"
-            detail = "Severe congestion: queue or waiting times significantly above 30-day average."
-        elif queue_ratio >= 1.2 or wait_ratio >= 1.2 or c.berthOccupancyPct >= 75:
+            detail = "Severe anchorage congestion: stationary/anchored vessel queue significantly above baseline."
+        elif queue_ratio >= 1.2 or c.anchorageQueueCount >= 12:
             tier = "medium"
-            detail = "Elevated congestion above rolling baseline."
+            detail = "Elevated vessel queue above rolling baseline."
 
         if queue_ratio >= 1.2:
             factors.append(
-                f"Anchorage queue {c.anchorageQueueCount} vs {c.rolling30dAvgQueue} avg (ratio {queue_ratio:.2f})"
+                f"Anchored/stationary queue {c.anchorageQueueCount} vs {c.rolling30dAvgQueue} avg (ratio {queue_ratio:.2f})"
             )
-        if wait_ratio >= 1.2:
-            factors.append(
-                f"Avg wait {c.avgWaitingTimeHours}h vs {c.rolling30dAvgWaitHours}h avg (ratio {wait_ratio:.2f})"
-            )
-        if c.berthOccupancyPct >= 75:
-            factors.append(f"Berth occupancy at {c.berthOccupancyPct}%")
+        if c.anchorageQueueCount >= 12:
+            factors.append(f"{c.anchorageQueueCount} stationary/anchored vessels in port geofence")
+        if c.activeVesselCount > 0:
+            factors.append(f"{c.activeVesselCount} total active vessels ({c.movingVesselCount} underway)")
 
         return SubRiskResult(
             category="congestion",
-            tier=tier,
-            score=TIER_SCORES[tier],
-            detail=detail,
-            factors=factors,
-        )
-
-    def _assess_terminal_delays(self, metrics: PortMetrics) -> SubRiskResult:
-        t = metrics.terminal
-        factors: List[str] = []
-
-        turnaround_ratio = (
-            t.berthTurnaroundHours / t.rolling30dAvgTurnaround
-            if t.rolling30dAvgTurnaround > 0
-            else 1.0
-        )
-
-        tier: RiskTier = "low"
-        detail = "Terminal operations within normal turnaround range."
-
-        if (
-            turnaround_ratio >= 1.5
-            or t.berthToAnchorageWaitRatio >= 0.7
-            or t.dwellTimeAnomalyScore >= 70
-        ):
-            tier = "high"
-            detail = "Significant terminal delays: turnaround or dwell anomalies detected."
-        elif (
-            turnaround_ratio >= 1.2
-            or t.berthToAnchorageWaitRatio >= 0.5
-            or t.dwellTimeAnomalyScore >= 40
-        ):
-            tier = "medium"
-            detail = "Terminal delays above baseline trends."
-
-        if turnaround_ratio >= 1.2:
-            factors.append(
-                f"Turnaround {t.berthTurnaroundHours}h vs {t.rolling30dAvgTurnaround}h avg (ratio {turnaround_ratio:.2f})"
-            )
-        if t.berthToAnchorageWaitRatio >= 0.5:
-            factors.append(f"Berth-to-anchorage wait ratio {t.berthToAnchorageWaitRatio}")
-        if t.dwellTimeAnomalyScore >= 40:
-            factors.append(f"Dwell anomaly score {t.dwellTimeAnomalyScore}/100")
-
-        return SubRiskResult(
-            category="terminalDelays",
             tier=tier,
             score=TIER_SCORES[tier],
             detail=detail,
@@ -204,30 +152,32 @@ class RiskService:
         factors: List[str] = []
 
         tier: RiskTier = "low"
-        detail = "Navigational conditions within safe clearance limits."
+        detail = "Navigational and NGA WPI depth clearances within safe operating limits."
 
-        if (
-            n.underKeelClearanceM <= th["ukcHighM"]
-            or n.airDraftClearanceM <= th["airDraftLowM"]
-            or not n.pilotageAvailable
-        ):
+        high_air_draft_class = vessel_class in ("ulcv", "neoPanamax", "pctc", "lng", "vlcc")
+        has_overhead_constraint = n.overheadLimits == "Yes" and high_air_draft_class
+
+        if n.underKeelClearanceM <= th["ukcHighM"] or not n.pilotageAvailable:
             tier = "high"
-            detail = "Critical navigational constraint: insufficient clearance or pilotage unavailable."
+            detail = "Critical navigational constraint: insufficient under-keel clearance or pilotage unavailable."
         elif (
             n.underKeelClearanceM <= th["ukcMediumM"]
-            or n.airDraftClearanceM <= th["airDraftMediumM"]
+            or has_overhead_constraint
+            or not n.tugsAssistance
         ):
             tier = "medium"
-            detail = "Navigational clearances approaching minimum safety margins."
+            detail = "Navigational clearances or port infrastructure approaching safety margins."
 
         if n.underKeelClearanceM <= th["ukcMediumM"]:
             factors.append(
-                f"UKC {n.underKeelClearanceM}m (minimum {th['ukcHighM']}m)"
+                f"UKC {n.underKeelClearanceM}m (Channel {n.channelDepthM}m vs Draft {n.vesselDraftM}m, min margin {th['ukcHighM']}m)"
             )
-        if n.airDraftClearanceM <= th["airDraftMediumM"]:
-            factors.append(f"Air draft clearance {n.airDraftClearanceM}m")
+        if has_overhead_constraint:
+            factors.append("Overhead bridge/cable limits reported in NGA World Port Index")
         if not n.pilotageAvailable:
-            factors.append("Pilotage currently unavailable")
+            factors.append("Pilotage unavailable in NGA World Port Index")
+        if not n.tugsAssistance:
+            factors.append("Tug assistance unavailable in NGA World Port Index")
 
         return SubRiskResult(
             category="navigational",
@@ -263,24 +213,17 @@ class RiskService:
             if now_time - cached_time < self.cache_ttl_seconds:
                 return cached_assessment
 
-        # Find port to extract lat/lon/locode
-        port = None
-        try:
-            port = await self.port_service.get_port_by_id(port_id, user_id=user_id)
-        except Exception:
-            pass
+        port = await self.port_service.get_port_by_id(port_id, user_id=user_id)
+        lat = port.lat
+        lon = port.lon
+        locode = port.locode
+        display_name = port_name or port.name
+        radius = port.geofenceRadiusNm
 
-        lat = port.lat if port else 51.9
-        lon = port.lon if port else 4.4
-        locode = port.locode if port else "NLRTM"
-        display_name = port_name or (port.name if port else port_id)
-
-        # Call external clients (with TTL caching and fallback mechanisms)
-        radius = port.geofenceRadiusNm if port else 8.0
         weather = await self.weather_client.get_marine_weather(
             lat, lon, port_id, force_refresh=force_refresh
         )
-        congestion, terminal, navigational = await self.ais_client.get_port_traffic_metrics(
+        congestion, navigational = await self.ais_client.get_port_traffic_metrics(
             port_id,
             locode,
             vessel_class,
@@ -295,14 +238,12 @@ class RiskService:
             portId=port_id,
             timestamp=now_str,
             congestion=congestion,
-            terminal=terminal,
             weather=weather,
             navigational=navigational,
         )
 
         sub_risks: Dict[SubRiskCategory, SubRiskResult] = {
             "congestion": self._assess_congestion(metrics),
-            "terminalDelays": self._assess_terminal_delays(metrics),
             "weather": self._assess_weather(metrics, vessel_class),
             "navigational": self._assess_navigational(metrics, vessel_class),
         }
@@ -366,22 +307,17 @@ class RiskService:
 
         points = min(days * 4, 40)  # 4 cycles per day, max 40 points
 
-        port = None
-        try:
-            port = await self.port_service.get_port_by_id(port_id, user_id=user_id)
-        except Exception:
-            pass
-        port_name = port.name if port else port_id
-        lat = port.lat if port else 51.9
-        lon = port.lon if port else 4.4
-        locode = port.locode if port else "NLRTM"
-        radius = port.geofenceRadiusNm if port else 8.0
+        port = await self.port_service.get_port_by_id(port_id, user_id=user_id)
+        port_name = port.name
+        lat = port.lat
+        lon = port.lon
+        locode = port.locode
+        radius = port.geofenceRadiusNm
 
-        # Anchor base metrics using current real readings
         base_weather = await self.weather_client.get_marine_weather(
             lat, lon, port_id, force_refresh=force_refresh
         )
-        base_congestion, base_terminal, base_navigational = (
+        base_congestion, base_navigational = (
             await self.ais_client.get_port_traffic_metrics(
                 port_id,
                 locode,
@@ -401,34 +337,16 @@ class RiskService:
             ts = now - timedelta(hours=i * 6)
             ts_str = ts.isoformat()
 
-            # Slight realistic historical variance based on cycle index
-            cycle_shift = (i % 7) - 3
-            weather_point = base_weather.model_copy(
-                update={
-                    "windSpeedKnots": max(5.0, round(base_weather.windSpeedKnots + cycle_shift * 1.5, 1)),
-                    "gustSpeedKnots": max(7.0, round(base_weather.gustSpeedKnots + cycle_shift * 2.0, 1)),
-                    "waveHeightM": max(0.5, round(base_weather.waveHeightM + cycle_shift * 0.2, 1)),
-                }
-            )
-            congestion_point = base_congestion.model_copy(
-                update={
-                    "anchorageQueueCount": max(1, base_congestion.anchorageQueueCount + cycle_shift),
-                    "avgWaitingTimeHours": max(2.0, round(base_congestion.avgWaitingTimeHours + cycle_shift * 1.2, 1)),
-                }
-            )
-
             metrics = PortMetrics(
                 portId=port_id,
                 timestamp=ts_str,
-                congestion=congestion_point,
-                terminal=base_terminal,
-                weather=weather_point,
+                congestion=base_congestion,
+                weather=base_weather,
                 navigational=base_navigational,
             )
 
             sub_risks: Dict[SubRiskCategory, SubRiskResult] = {
                 "congestion": self._assess_congestion(metrics),
-                "terminalDelays": self._assess_terminal_delays(metrics),
                 "weather": self._assess_weather(metrics, vessel_class),
                 "navigational": self._assess_navigational(metrics, vessel_class),
             }
@@ -460,3 +378,4 @@ def time_seed_now() -> int:
 
 
 risk_service = RiskService()
+

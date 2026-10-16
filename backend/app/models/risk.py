@@ -6,43 +6,41 @@ from app.models.common import RiskTier, SubRiskCategory, VesselClass
 
 
 class CongestionMetrics(BaseModel):
-    anchorageQueueCount: int = Field(..., description="Active vessels in anchorage queue", examples=[18])
-    avgWaitingTimeHours: float = Field(..., description="Average anchorage wait time in hours", examples=[28.5])
-    berthOccupancyPct: float = Field(..., ge=0.0, le=100.0, description="Berth occupancy percentage", examples=[82.0])
-    rolling30dAvgQueue: float = Field(..., description="Historical 30-day average queue count", examples=[14.2])
-    rolling30dAvgWaitHours: float = Field(..., description="Historical 30-day average wait time", examples=[22.1])
-
-
-class TerminalMetrics(BaseModel):
-    berthTurnaroundHours: float = Field(..., description="Average turnaround time at berth", examples=[36.4])
-    berthToAnchorageWaitRatio: float = Field(..., description="Ratio of turnaround to wait time", examples=[1.28])
-    dwellTimeAnomalyScore: float = Field(..., description="Dwell time anomaly score (0-100)", examples=[1.15])
-    rolling30dAvgTurnaround: float = Field(..., description="Historical 30-day average turnaround", examples=[32.0])
+    anchorageQueueCount: int = Field(..., description="Stationary/anchored vessels in port geofence (SOG <= 0.5 kn)", examples=[8])
+    activeVesselCount: int = Field(default=0, description="Total live vessels detected in port geofence via AISStream", examples=[21])
+    movingVesselCount: int = Field(default=0, description="Moving/maneuvering vessels in port geofence (SOG > 0.5 kn)", examples=[13])
+    rolling30dAvgQueue: float = Field(default=0.0, description="Historical 30-day average stationary vessel count from SQLite snapshots", examples=[7.5])
 
 
 class WeatherMetrics(BaseModel):
-    windSpeedKnots: float = Field(..., description="Sustained wind speed in knots", examples=[28.4])
-    waveHeightM: float = Field(..., description="Significant wave height in meters", examples=[2.3])
-    swellPeriodSec: float = Field(..., description="Swell period in seconds", examples=[8.5])
-    visibilityNm: float = Field(..., description="Visibility distance in nautical miles", examples=[6.2])
-    gustSpeedKnots: float = Field(..., description="Peak wind gust speed in knots", examples=[35.1])
+    windSpeedKnots: float = Field(..., description="Sustained wind speed in knots from Open-Meteo", examples=[28.4])
+    waveHeightM: float = Field(..., description="Significant wave height in meters from Open-Meteo", examples=[2.3])
+    swellPeriodSec: float = Field(..., description="Swell wave period in seconds from Open-Meteo", examples=[8.5])
+    visibilityNm: float = Field(..., description="Visibility distance in nautical miles from Open-Meteo", examples=[6.2])
+    gustSpeedKnots: float = Field(..., description="Peak wind gust speed in knots from Open-Meteo", examples=[35.1])
 
 
 class NavigationalMetrics(BaseModel):
-    underKeelClearanceM: float = Field(..., description="Under-keel clearance in meters", examples=[2.1])
-    channelDepthM: float = Field(..., description="Channel navigation depth in meters", examples=[16.5])
-    airDraftClearanceM: float = Field(..., description="Air draft clearance under bridges in meters", examples=[8.4])
-    pilotageAvailable: bool = Field(..., description="Harbor pilot availability", examples=[True])
-    tideHeightM: float = Field(..., description="Tidal height above chart datum in meters", examples=[1.8])
+    underKeelClearanceM: float = Field(..., description="Derived depth margin: WPI controlling depth minus vessel class design draft (m)", examples=[2.1])
+    channelDepthM: float = Field(..., description="Channel depth in meters from NGA World Port Index (Pub 150)", examples=[16.5])
+    cargoPierDepthM: float = Field(default=0.0, description="Cargo pier / terminal depth in meters from NGA World Port Index (Pub 150)", examples=[14.0])
+    anchorageDepthM: float = Field(default=0.0, description="Anchorage depth in meters from NGA World Port Index (Pub 150)", examples=[15.5])
+    vesselDraftM: float = Field(default=12.0, description="Selected vessel class design draft in meters", examples=[12.0])
+    overheadLimits: str = Field(default="Unknown", description="Overhead bridge/cable limits (Yes / No / Unknown) from NGA World Port Index", examples=["Yes"])
+    pilotageAvailable: bool = Field(..., description="Harbor pilot availability from NGA World Port Index", examples=[True])
+    tugsAssistance: bool = Field(default=True, description="Tug assistance availability from NGA World Port Index", examples=[True])
+    tideHeightM: float = Field(..., description="Tidal range in meters from NGA World Port Index", examples=[1.8])
+    harborSize: str = Field(default="Unknown", description="Harbor size from NGA World Port Index", examples=["Large"])
+    shelterAfforded: str = Field(default="Unknown", description="Shelter afforded from NGA World Port Index", examples=["Good"])
 
 
 class PortMetrics(BaseModel):
-    portId: str = Field(..., examples=["port-rotterdam"])
+    portId: str = Field(..., examples=["port-nlrtm"])
     timestamp: str = Field(..., examples=["2026-10-16T00:00:00Z"])
     congestion: CongestionMetrics
-    terminal: TerminalMetrics
     weather: WeatherMetrics
     navigational: NavigationalMetrics
+
 
 
 class SubRiskResult(BaseModel):

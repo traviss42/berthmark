@@ -1,4 +1,4 @@
-"""Tests for external API clients, mocking HTTP requests and verifying fallback behaviors."""
+"""Tests for external API clients, mocking HTTP requests and verifying real data parsing and SQLite caching."""
 
 import httpx
 import pytest
@@ -9,9 +9,13 @@ from app.clients.weather_client import MarineWeatherClient
 
 @pytest.mark.asyncio
 async def test_weather_client_with_successful_mock_response(monkeypatch):
-    """When weather API returns 200, client correctly parses response."""
+    """When weather API returns 200, client parses real wave_height, swell_wave_period, visibility, and wind."""
     mock_payload = {
-        "current": {"wave_height": 2.8},
+        "current": {
+            "wave_height": 2.8,
+            "swell_wave_period": 8.4,
+            "visibility": 14816.0,  # 8.0 Nm
+        },
         "hourly": {
             "wind_speed_10m": [32.5, 30.1],
             "wind_gusts_10m": [42.0, 39.5],
@@ -20,6 +24,9 @@ async def test_weather_client_with_successful_mock_response(monkeypatch):
 
     class MockResponse:
         status_code = 200
+
+        def raise_for_status(self):
+            pass
 
         def json(self):
             return mock_payload
@@ -33,55 +40,55 @@ async def test_weather_client_with_successful_mock_response(monkeypatch):
     result = await client.get_marine_weather(lat=51.9, lon=4.4, port_id="port-rotterdam")
 
     assert result.waveHeightM == 2.8
+    assert result.swellPeriodSec == 8.4
+    assert result.visibilityNm == 8.0
     assert result.windSpeedKnots == 32.5
     assert result.gustSpeedKnots == 42.0
 
 
 @pytest.mark.asyncio
-async def test_weather_client_fallback_on_network_error(monkeypatch):
-    """When weather API throws network error, client provides deterministic fallback."""
+async def test_weather_client_raises_on_network_error_without_fallback(monkeypatch):
+    """When weather API throws network error and no cache exists, client raises rather than fabricating data."""
     async def mock_get_error(self, url, **kwargs):
         raise httpx.ConnectError("Network unreachable")
 
     monkeypatch.setattr(httpx.AsyncClient, "get", mock_get_error)
 
     client = MarineWeatherClient(base_url="https://mock-weather.example.com")
-    result = await client.get_marine_weather(lat=51.9, lon=4.4, port_id="port-rotterdam")
-
-    assert result.windSpeedKnots > 0
-    assert result.gustSpeedKnots >= result.windSpeedKnots
-    assert result.waveHeightM > 0
-    assert result.visibilityNm > 0
+    with pytest.raises(httpx.ConnectError):
+        await client.get_marine_weather(lat=51.9, lon=4.4, port_id="port-rotterdam")
 
 
 @pytest.mark.asyncio
 async def test_ais_client_with_mock_response(monkeypatch):
-    """When AIS API returns 200, client parses congestion, terminal, and navigational metrics."""
+    """When AIS API returns 200, client parses congestion and navigational metrics."""
     mock_payload = {
         "congestion": {
             "anchorageQueueCount": 15,
-            "avgWaitingTimeHours": 24.0,
-            "berthOccupancyPct": 80.0,
+            "activeVesselCount": 42,
+            "movingVesselCount": 27,
             "rolling30dAvgQueue": 12.0,
-            "rolling30dAvgWaitHours": 20.0,
-        },
-        "terminal": {
-            "berthTurnaroundHours": 30.0,
-            "berthToAnchorageWaitRatio": 0.5,
-            "dwellTimeAnomalyScore": 35.0,
-            "rolling30dAvgTurnaround": 28.0,
         },
         "navigational": {
             "underKeelClearanceM": 2.5,
             "channelDepthM": 16.0,
-            "airDraftClearanceM": 8.0,
+            "cargoPierDepthM": 16.5,
+            "anchorageDepthM": 18.0,
+            "vesselDraftM": 12.5,
+            "overheadLimits": "No",
             "pilotageAvailable": True,
+            "tugsAssistance": True,
             "tideHeightM": 1.5,
+            "harborSize": "Large",
+            "shelterAfforded": "Good",
         },
     }
 
     class MockResponse:
         status_code = 200
+
+        def raise_for_status(self):
+            pass
 
         def json(self):
             return mock_payload
@@ -92,35 +99,42 @@ async def test_ais_client_with_mock_response(monkeypatch):
     monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
 
     client = AISClient(api_key="test-api-key", base_url="https://mock-ais.example.com")
-    congestion, terminal, navigational = await client.get_port_traffic_metrics(
+    congestion, navigational = await client.get_port_traffic_metrics(
         "port-rotterdam", "NLRTM", "panamax"
     )
 
     assert congestion.anchorageQueueCount == 15
-    assert terminal.berthTurnaroundHours == 30.0
+    assert congestion.activeVesselCount == 42
     assert navigational.channelDepthM == 16.0
 
 
 @pytest.mark.asyncio
-async def test_ais_client_fallback_when_unconfigured():
-    """When no API key is provided, AISClient generates deterministic fallback metrics."""
+async def test_ais_client_uses_real_wpi_navigational_data():
+    """AISClient populates real NGA World Port Index depth and hydrographic metrics for matched ports."""
     client = AISClient(api_key="", base_url="https://api.aisstream.io/v1")
-    congestion, terminal, navigational = await client.get_port_traffic_metrics(
+    congestion, navigational = await client.get_port_traffic_metrics(
         "port-rotterdam", "NLRTM", "neoPanamax"
     )
 
-    assert congestion.anchorageQueueCount > 0
-    assert terminal.berthTurnaroundHours > 0
-    assert navigational.channelDepthM > 0
+    assert congestion.anchorageQueueCount >= 0
+    assert navigational.channelDepthM == 11.0
+    assert navigational.anchorageDepthM == 11.0
+    assert navigational.cargoPierDepthM == 6.4
+    assert navigational.vesselDraftM == 15.2
+    assert navigational.underKeelClearanceM == -4.2
+    assert navigational.overheadLimits == "Yes"
+    assert navigational.pilotageAvailable is True
 
 
 @pytest.mark.asyncio
-async def test_port_directory_client_fallback_search():
-    """PortDirectoryClient searches fallback reference data successfully."""
+async def test_port_directory_client_search():
+    """PortDirectoryClient searches the combined UN/LOCODE + NGA World Port Index database."""
     client = PortDirectoryClient(base_url="")
     results = await client.search_ports("Singapore")
     assert len(results) >= 1
-    assert results[0].locode == "SGSIN"
+    assert any(r.locode == "SGKEP" for r in results)
+    kep = next(r for r in results if r.locode == "SGKEP")
+    assert kep.channelDepthM == 12.5
 
 
 @pytest.mark.asyncio
@@ -191,7 +205,7 @@ async def test_weather_client_stale_cache_fetches_fresh_and_updates_sqlite(monke
 
     # Fresh response from mock HTTP API
     mock_payload = {
-        "current": {"wave_height": 2.9},
+        "current": {"wave_height": 2.9, "swell_wave_period": 7.8, "visibility": 18520.0},
         "hourly": {
             "wind_speed_10m": [28.0],
             "wind_gusts_10m": [36.0],
@@ -200,6 +214,9 @@ async def test_weather_client_stale_cache_fetches_fresh_and_updates_sqlite(monke
 
     class MockResponse:
         status_code = 200
+
+        def raise_for_status(self):
+            pass
 
         def json(self):
             return mock_payload
@@ -239,19 +256,20 @@ async def test_ais_client_sqlite_cache_hit_and_persistence(monkeypatch):
             locode="NLRTM",
             vessel_class="neoPanamax",
             anchorage_queue_count=19,
-            avg_waiting_time_hours=27.5,
-            berth_occupancy_pct=85.0,
+            active_vessel_count=45,
+            moving_vessel_count=26,
             rolling_30d_avg_queue=14.0,
-            rolling_30d_avg_wait_hours=22.0,
-            berth_turnaround_hours=32.0,
-            berth_to_anchorage_wait_ratio=0.6,
-            dwell_time_anomaly_score=45.0,
-            rolling_30d_avg_turnaround=30.0,
             under_keel_clearance_m=2.0,
             channel_depth_m=16.5,
-            air_draft_clearance_m=8.5,
+            cargo_pier_depth_m=17.0,
+            anchorage_depth_m=18.0,
+            vessel_draft_m=15.2,
+            overhead_limits="Yes",
             pilotage_available=True,
+            tugs_assistance=True,
             tide_height_m=1.5,
+            harbor_size="Large",
+            shelter_afforded="Good",
             source="aisstream",
             fetched_at=now - timedelta(minutes=10),
         )
@@ -265,10 +283,11 @@ async def test_ais_client_sqlite_cache_hit_and_persistence(monkeypatch):
     monkeypatch.setattr(httpx.AsyncClient, "get", mock_fail_if_called)
 
     client = AISClient(api_key="test-key", base_url="https://mock-ais.example.com")
-    congestion, terminal, navigational = await client.get_port_traffic_metrics(
+    congestion, navigational = await client.get_port_traffic_metrics(
         "port-rotterdam", "NLRTM", "neoPanamax"
     )
 
     assert congestion.anchorageQueueCount == 19
-    assert terminal.berthTurnaroundHours == 32.0
+    assert congestion.activeVesselCount == 45
     assert navigational.channelDepthM == 16.5
+

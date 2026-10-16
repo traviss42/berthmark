@@ -1,4 +1,4 @@
-import { ArrowLeft, MapPin, Trash2, RefreshCw, Wind, Waves, Eye, Compass, Anchor, Clock, Bell, BellOff, Mail } from 'lucide-react';
+import { ArrowLeft, MapPin, Trash2, RefreshCw, Wind, Waves, Eye, Compass, Anchor, Bell, BellOff, Mail } from 'lucide-react';
 import type { RiskAssessment } from '@/types';
 import { RiskBadge } from './RiskBadge';
 import { SubRiskBreakdown } from './SubRiskBreakdown';
@@ -149,38 +149,25 @@ export function PortRiskDetail({
 
       {/* Raw Metrics */}
       <div>
-        <h3 className="text-sm font-semibold text-slate-700 mb-3">Live Metrics</h3>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <h3 className="text-sm font-semibold text-slate-700 mb-3">Live & Hydrographic Metrics</h3>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Congestion Metrics */}
           <div className="rounded-lg border border-slate-200 p-4 bg-white">
             <h4 className="text-sm font-medium text-slate-700 mb-3 flex items-center gap-2">
-              <Anchor className="w-4 h-4 text-slate-500" /> Congestion
+              <Anchor className="w-4 h-4 text-slate-500" /> Vessel Traffic (AISStream)
             </h4>
             <div className="grid grid-cols-2 gap-3 text-sm">
-              <Metric label="Anchorage Queue" value={`${m.congestion.anchorageQueueCount} vessels`} />
-              <Metric label="Avg Wait Time" value={`${m.congestion.avgWaitingTimeHours}h`} />
-              <Metric label="Berth Occupancy" value={`${m.congestion.berthOccupancyPct}%`} />
-              <Metric label="30d Avg Queue" value={`${m.congestion.rolling30dAvgQueue} vessels`} />
-            </div>
-          </div>
-
-          {/* Terminal Metrics */}
-          <div className="rounded-lg border border-slate-200 p-4 bg-white">
-            <h4 className="text-sm font-medium text-slate-700 mb-3 flex items-center gap-2">
-              <Clock className="w-4 h-4 text-slate-500" /> Terminal
-            </h4>
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <Metric label="Berth Turnaround" value={`${m.terminal.berthTurnaroundHours}h`} />
-              <Metric label="Wait Ratio" value={m.terminal.berthToAnchorageWaitRatio.toFixed(2)} />
-              <Metric label="Dwell Anomaly" value={`${m.terminal.dwellTimeAnomalyScore}/100`} />
-              <Metric label="30d Avg Turnaround" value={`${m.terminal.rolling30dAvgTurnaround}h`} />
+              <Metric label="Anchored / Stationary" value={`${m.congestion.anchorageQueueCount} vessels`} />
+              <Metric label="Active in Geofence" value={`${m.congestion.activeVesselCount} vessels`} />
+              <Metric label="Underway Vessels" value={`${m.congestion.movingVesselCount} vessels`} />
+              <Metric label="Historical Avg Queue" value={`${m.congestion.rolling30dAvgQueue} vessels`} />
             </div>
           </div>
 
           {/* Weather Metrics */}
           <div className="rounded-lg border border-slate-200 p-4 bg-white">
             <h4 className="text-sm font-medium text-slate-700 mb-3 flex items-center gap-2">
-              <Wind className="w-4 h-4 text-slate-500" /> Weather
+              <Wind className="w-4 h-4 text-slate-500" /> Marine Weather (Open-Meteo)
             </h4>
             <div className="grid grid-cols-2 gap-3 text-sm">
               <Metric label="Wind Speed" value={`${m.weather.windSpeedKnots} kn`} icon={<Wind className="w-3 h-3" />} />
@@ -194,14 +181,19 @@ export function PortRiskDetail({
           {/* Navigational Metrics */}
           <div className="rounded-lg border border-slate-200 p-4 bg-white">
             <h4 className="text-sm font-medium text-slate-700 mb-3 flex items-center gap-2">
-              <Compass className="w-4 h-4 text-slate-500" /> Navigational
+              <Compass className="w-4 h-4 text-slate-500" /> Navigational & Depth (NGA WPI)
             </h4>
             <div className="grid grid-cols-2 gap-3 text-sm">
               <Metric label="Under-Keel Clearance" value={`${m.navigational.underKeelClearanceM} m`} />
               <Metric label="Channel Depth" value={`${m.navigational.channelDepthM} m`} />
-              <Metric label="Air Draft Clearance" value={`${m.navigational.airDraftClearanceM} m`} />
-              <Metric label="Tide Height" value={`${m.navigational.tideHeightM} m`} />
+              {m.navigational.cargoPierDepthM != null && (
+                <Metric label="Cargo Pier Depth" value={`${m.navigational.cargoPierDepthM} m`} />
+              )}
+              <Metric label="Vessel Design Draft" value={`${m.navigational.vesselDraftM} m`} />
+              <Metric label="Overhead Limits" value={m.navigational.overheadLimits} />
+              <Metric label="Tidal Range" value={`${m.navigational.tideHeightM} m`} />
               <Metric label="Pilotage" value={m.navigational.pilotageAvailable ? 'Available' : 'Unavailable'} />
+              <Metric label="Tug Assistance" value={m.navigational.tugsAssistance ? 'Available' : 'Unavailable'} />
             </div>
           </div>
         </div>

@@ -6,7 +6,6 @@ from app.clients.weather_client import MarineWeatherClient
 from app.models.risk import (
     CongestionMetrics,
     NavigationalMetrics,
-    TerminalMetrics,
     WeatherMetrics,
 )
 
@@ -31,8 +30,8 @@ async def get_port_traffic_metrics(
     lon: Optional[float] = None,
     geofence_radius_nm: float = 8.0,
     force_refresh: bool = False,
-) -> Tuple[CongestionMetrics, TerminalMetrics, NavigationalMetrics]:
-    """Fetch AIS traffic metrics with SQLite caching (< 30 min freshness)."""
+) -> Tuple[CongestionMetrics, NavigationalMetrics]:
+    """Fetch AIS traffic and NGA WPI navigational metrics with SQLite caching (< 30 min freshness)."""
     return await ais_client.get_port_traffic_metrics(
         port_id=port_id,
         locode=locode,
@@ -47,3 +46,4 @@ async def get_port_traffic_metrics(
 # Aliases for convenience
 fetch_marine_weather = get_marine_weather
 fetch_ais_traffic = get_port_traffic_metrics
+

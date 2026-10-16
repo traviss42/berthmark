@@ -28,6 +28,67 @@ class Port(BaseModel):
         description="Whether email notifications and risk alerts are enabled for this port",
         examples=[True],
     )
+    channelDepthM: Optional[float] = Field(
+        default=None,
+        description="Channel depth in meters from NGA World Port Index (Pub 150)",
+        examples=[11.0],
+    )
+    cargoPierDepthM: Optional[float] = Field(
+        default=None,
+        description="Cargo pier depth in meters from NGA World Port Index (Pub 150)",
+        examples=[14.0],
+    )
+    anchorageDepthM: Optional[float] = Field(
+        default=None,
+        description="Anchorage depth in meters from NGA World Port Index (Pub 150)",
+        examples=[15.5],
+    )
+    oilTerminalDepthM: Optional[float] = Field(
+        default=None,
+        description="Oil terminal depth in meters from NGA World Port Index (Pub 150)",
+        examples=[0.0],
+    )
+    lngTerminalDepthM: Optional[float] = Field(
+        default=None,
+        description="LNG terminal depth in meters from NGA World Port Index (Pub 150)",
+        examples=[0.0],
+    )
+    maxVesselDraftM: Optional[float] = Field(
+        default=None,
+        description="Maximum vessel draft in meters from NGA World Port Index (Pub 150)",
+        examples=[15.0],
+    )
+    tidalRangeM: Optional[float] = Field(
+        default=None,
+        description="Tidal range in meters from NGA World Port Index (Pub 150)",
+        examples=[2.0],
+    )
+    overheadLimits: Optional[str] = Field(
+        default=None,
+        description="Overhead limits (Yes / No / Unknown) from NGA World Port Index (Pub 150)",
+        examples=["Yes"],
+    )
+    pilotageAvailable: Optional[bool] = Field(
+        default=None,
+        description="Harbor pilotage availability from NGA World Port Index (Pub 150)",
+        examples=[True],
+    )
+    tugsAssistance: Optional[bool] = Field(
+        default=None,
+        description="Tug assistance availability from NGA World Port Index (Pub 150)",
+        examples=[True],
+    )
+    harborSize: Optional[str] = Field(
+        default=None,
+        description="Harbor size classification from NGA World Port Index (Pub 150)",
+        examples=["Large"],
+    )
+    shelterAfforded: Optional[str] = Field(
+        default=None,
+        description="Shelter afforded classification from NGA World Port Index (Pub 150)",
+        examples=["Good"],
+    )
+
 
 
 class CreatePortRequest(BaseModel):

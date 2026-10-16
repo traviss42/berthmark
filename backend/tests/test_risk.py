@@ -1,12 +1,12 @@
 """Unit and integration tests for risk scoring and trend endpoints."""
 
 from fastapi.testclient import TestClient
-from app.models.risk import CongestionMetrics, NavigationalMetrics, PortMetrics, TerminalMetrics, WeatherMetrics
+from app.models.risk import CongestionMetrics, NavigationalMetrics, PortMetrics, WeatherMetrics
 from app.services.risk_service import risk_service
 
 
 def test_get_risk_assessment_endpoint(client: TestClient):
-    """GET /api/v1/ports/{portId}/risk returns complete assessment."""
+    """GET /api/v1/ports/{portId}/risk returns complete assessment with 3 real sub-risks."""
     resp = client.get("/api/v1/ports/port-rotterdam/risk?vesselClass=neoPanamax")
     assert resp.status_code == 200
     data = resp.json()
@@ -15,10 +15,11 @@ def test_get_risk_assessment_endpoint(client: TestClient):
     assert data["vesselClass"] == "neoPanamax"
     assert data["compositeTier"] in ["low", "medium", "high"]
     assert "congestion" in data["subRisks"]
-    assert "terminalDelays" in data["subRisks"]
     assert "weather" in data["subRisks"]
     assert "navigational" in data["subRisks"]
+    assert "terminalDelays" not in data["subRisks"]
     assert "metrics" in data
+    assert data["metrics"]["navigational"]["channelDepthM"] == 11.0
 
 
 def test_weakest_link_scoring_rule():
@@ -28,16 +29,9 @@ def test_weakest_link_scoring_rule():
         timestamp="2026-10-16T00:00:00Z",
         congestion=CongestionMetrics(
             anchorageQueueCount=30,  # 30 / 10 = 3.0 ratio -> High
-            avgWaitingTimeHours=40.0,
-            berthOccupancyPct=95.0,
+            activeVesselCount=55,
+            movingVesselCount=25,
             rolling30dAvgQueue=10.0,
-            rolling30dAvgWaitHours=20.0,
-        ),
-        terminal=TerminalMetrics(
-            berthTurnaroundHours=20.0,
-            berthToAnchorageWaitRatio=0.2,
-            dwellTimeAnomalyScore=20.0,
-            rolling30dAvgTurnaround=22.0,
         ),
         weather=WeatherMetrics(
             windSpeedKnots=10.0,
@@ -49,15 +43,20 @@ def test_weakest_link_scoring_rule():
         navigational=NavigationalMetrics(
             underKeelClearanceM=5.0,
             channelDepthM=18.0,
-            airDraftClearanceM=15.0,
+            cargoPierDepthM=17.5,
+            anchorageDepthM=20.0,
+            vesselDraftM=12.5,
+            overheadLimits="No",
             pilotageAvailable=True,
+            tugsAssistance=True,
             tideHeightM=2.0,
+            harborSize="Large",
+            shelterAfforded="Good",
         ),
     )
 
     sub_risks = {
         "congestion": risk_service._assess_congestion(metrics),
-        "terminalDelays": risk_service._assess_terminal_delays(metrics),
         "weather": risk_service._assess_weather(metrics, "neoPanamax"),
         "navigational": risk_service._assess_navigational(metrics, "neoPanamax"),
     }
@@ -72,7 +71,7 @@ def test_bulk_risk_assessment_endpoint(client: TestClient):
     payload = {
         "ports": [
             {"id": "port-rotterdam", "name": "Port of Rotterdam"},
-            {"id": "port-singapore", "name": "Port of Singapore"},
+            {"id": "port-singapore", "name": "Port of Keppel"},
         ],
         "vesselClass": "ulcv",
     }
@@ -115,4 +114,5 @@ def test_risk_caching_and_force_refresh(client: TestClient):
     assert resp3.status_code == 200
     data3 = resp3.json()
     assert data3["portId"] == "port-rotterdam"
+
 

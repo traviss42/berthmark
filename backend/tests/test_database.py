@@ -164,19 +164,20 @@ def test_external_ais_traffic_cache_persistence_and_freshness():
             locode="NLRTM",
             vessel_class="panamax",
             anchorage_queue_count=14,
-            avg_waiting_time_hours=19.5,
-            berth_occupancy_pct=78.0,
+            active_vessel_count=38,
+            moving_vessel_count=24,
             rolling_30d_avg_queue=11.0,
-            rolling_30d_avg_wait_hours=18.0,
-            berth_turnaround_hours=26.0,
-            berth_to_anchorage_wait_ratio=0.55,
-            dwell_time_anomaly_score=42.0,
-            rolling_30d_avg_turnaround=25.0,
-            under_keel_clearance_m=2.2,
+            under_keel_clearance_m=3.0,
             channel_depth_m=15.5,
-            air_draft_clearance_m=7.0,
+            cargo_pier_depth_m=16.0,
+            anchorage_depth_m=18.0,
+            vessel_draft_m=12.5,
+            overhead_limits="Yes",
             pilotage_available=True,
+            tugs_assistance=True,
             tide_height_m=1.8,
+            harbor_size="Large",
+            shelter_afforded="Good",
             source="aisstream",
             fetched_at=now,
         )
@@ -189,10 +190,11 @@ def test_external_ais_traffic_cache_persistence_and_freshness():
         assert queried.anchorage_queue_count == 14
         assert queried.is_fresh(1800.0) is True
 
-        cong, term, nav = queried.to_pydantic()
+        cong, nav = queried.to_pydantic()
         assert cong.anchorageQueueCount == 14
-        assert term.berthTurnaroundHours == 26.0
+        assert cong.activeVesselCount == 38
         assert nav.channelDepthM == 15.5
+        assert nav.overheadLimits == "Yes"
 
         # Test stale check
         queried.fetched_at = now - timedelta(minutes=35)
@@ -201,3 +203,4 @@ def test_external_ais_traffic_cache_persistence_and_freshness():
     with get_db_context() as db:
         stale_record = db.query(ExternalAISTrafficCache).filter(ExternalAISTrafficCache.id == "port-rtm-01:panamax").first()
         assert stale_record.is_fresh(1800.0) is False
+

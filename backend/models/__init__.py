@@ -16,9 +16,9 @@ __all__ = [
     "CreatePortRequest",
     "UpdatePortNotificationsRequest",
     "CongestionMetrics",
-    "TerminalMetrics",
     "WeatherMetrics",
     "NavigationalMetrics",
+
     "PortMetrics",
     "SubRiskResult",
     "RiskAssessment",

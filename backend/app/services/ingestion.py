@@ -15,11 +15,11 @@ logger = logging.getLogger(__name__)
 
 # Default major maritime hubs used for baseline ingestion if no user ports exist
 DEFAULT_INGESTION_HUBS = [
-    {"id": "port-rtm-01", "name": "Rotterdam", "locode": "NLRTM", "lat": 51.9244, "lon": 4.4777},
-    {"id": "port-sin-02", "name": "Singapore", "locode": "SGSIN", "lat": 1.2648, "lon": 103.8408},
-    {"id": "port-sha-03", "name": "Shanghai", "locode": "CNSHA", "lat": 31.2304, "lon": 121.4737},
-    {"id": "port-ham-04", "name": "Hamburg", "locode": "DEHAM", "lat": 53.5399, "lon": 9.9472},
-    {"id": "port-lax-05", "name": "Los Angeles", "locode": "USLAX", "lat": 33.7291, "lon": -118.2639},
+    {"id": "port-nlrtm", "name": "Port of Rotterdam", "locode": "NLRTM", "lat": 51.9167, "lon": 4.4},
+    {"id": "port-sgkep", "name": "Port of Keppel", "locode": "SGKEP", "lat": 1.2667, "lon": 103.8333},
+    {"id": "port-cnsgh", "name": "Port of Shanghai", "locode": "CNSGH", "lat": 31.2333, "lon": 121.4667},
+    {"id": "port-deham", "name": "Port of Hamburg", "locode": "DEHAM", "lat": 53.55, "lon": 9.9833},
+    {"id": "port-uslax", "name": "Port of Los Angeles", "locode": "USLAX", "lat": 33.7333, "lon": -118.2667},
 ]
 
 INGESTION_VESSEL_CLASSES = ["neoPanamax", "panamax", "feeder"]

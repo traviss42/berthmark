@@ -13,10 +13,14 @@ from app.models.risk import (
     PortRef,
     RiskAssessment,
     SubRiskResult,
-    TerminalMetrics,
     WeatherMetrics,
 )
-from app.models.external_cache import ExternalAISTrafficCache, ExternalWeatherCache
+
+def __getattr__(name: str):
+    if name in ("ExternalAISTrafficCache", "ExternalWeatherCache"):
+        from app.models import external_cache
+        return getattr(external_cache, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     "RiskTier",
@@ -27,11 +31,11 @@ __all__ = [
     "CreatePortRequest",
     "UpdatePortNotificationsRequest",
     "CongestionMetrics",
-    "TerminalMetrics",
     "WeatherMetrics",
     "NavigationalMetrics",
     "PortMetrics",
     "SubRiskResult",
+
     "RiskAssessment",
     "PortRef",
     "BulkRiskAssessmentRequest",

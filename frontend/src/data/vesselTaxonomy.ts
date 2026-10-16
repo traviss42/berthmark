@@ -125,21 +125,19 @@ export const VESSEL_CLASS_THRESHOLDS: Record<
     windMediumKnots: number;
     ukcHighM: number;
     ukcMediumM: number;
-    airDraftClearanceLowM: number;
-    airDraftClearanceMediumM: number;
   }
 > = {
-  feeder:        { windHighKnots: 45, windMediumKnots: 30, ukcHighM: 1.0, ukcMediumM: 2.0, airDraftClearanceLowM: 2,  airDraftClearanceMediumM: 5 },
-  panamax:       { windHighKnots: 40, windMediumKnots: 28, ukcHighM: 1.2, ukcMediumM: 2.5, airDraftClearanceLowM: 3,  airDraftClearanceMediumM: 6 },
-  neoPanamax:    { windHighKnots: 35, windMediumKnots: 25, ukcHighM: 1.5, ukcMediumM: 3.0, airDraftClearanceLowM: 4,  airDraftClearanceMediumM: 8 },
-  ulcv:          { windHighKnots: 28, windMediumKnots: 20, ukcHighM: 2.0, ukcMediumM: 3.5, airDraftClearanceLowM: 5,  airDraftClearanceMediumM: 10 },
-  mrTanker:      { windHighKnots: 45, windMediumKnots: 30, ukcHighM: 1.0, ukcMediumM: 2.0, airDraftClearanceLowM: 2,  airDraftClearanceMediumM: 5 },
-  aframax:       { windHighKnots: 40, windMediumKnots: 28, ukcHighM: 1.5, ukcMediumM: 2.5, airDraftClearanceLowM: 3,  airDraftClearanceMediumM: 6 },
-  suezmax:       { windHighKnots: 38, windMediumKnots: 25, ukcHighM: 1.8, ukcMediumM: 3.0, airDraftClearanceLowM: 4,  airDraftClearanceMediumM: 7 },
-  vlcc:          { windHighKnots: 35, windMediumKnots: 22, ukcHighM: 2.5, ukcMediumM: 4.0, airDraftClearanceLowM: 5,  airDraftClearanceMediumM: 10 },
-  handysize:     { windHighKnots: 45, windMediumKnots: 30, ukcHighM: 1.0, ukcMediumM: 2.0, airDraftClearanceLowM: 2,  airDraftClearanceMediumM: 5 },
-  panamaxBulk:   { windHighKnots: 40, windMediumKnots: 28, ukcHighM: 1.5, ukcMediumM: 2.5, airDraftClearanceLowM: 3,  airDraftClearanceMediumM: 6 },
-  capesize:      { windHighKnots: 35, windMediumKnots: 25, ukcHighM: 2.0, ukcMediumM: 3.5, airDraftClearanceLowM: 4,  airDraftClearanceMediumM: 8 },
-  pctc:          { windHighKnots: 25, windMediumKnots: 18, ukcHighM: 1.5, ukcMediumM: 2.5, airDraftClearanceLowM: 5,  airDraftClearanceMediumM: 10 },
-  lng:           { windHighKnots: 30, windMediumKnots: 22, ukcHighM: 2.0, ukcMediumM: 3.0, airDraftClearanceLowM: 5,  airDraftClearanceMediumM: 10 },
+  feeder:        { windHighKnots: 45, windMediumKnots: 30, ukcHighM: 0.5, ukcMediumM: 1.5 },
+  panamax:       { windHighKnots: 40, windMediumKnots: 28, ukcHighM: 0.8, ukcMediumM: 2.0 },
+  neoPanamax:    { windHighKnots: 35, windMediumKnots: 25, ukcHighM: 1.0, ukcMediumM: 2.5 },
+  ulcv:          { windHighKnots: 28, windMediumKnots: 20, ukcHighM: 1.5, ukcMediumM: 3.0 },
+  mrTanker:      { windHighKnots: 45, windMediumKnots: 30, ukcHighM: 0.5, ukcMediumM: 1.5 },
+  aframax:       { windHighKnots: 40, windMediumKnots: 28, ukcHighM: 1.0, ukcMediumM: 2.0 },
+  suezmax:       { windHighKnots: 38, windMediumKnots: 25, ukcHighM: 1.2, ukcMediumM: 2.5 },
+  vlcc:          { windHighKnots: 35, windMediumKnots: 22, ukcHighM: 1.8, ukcMediumM: 3.5 },
+  handysize:     { windHighKnots: 45, windMediumKnots: 30, ukcHighM: 0.5, ukcMediumM: 1.5 },
+  panamaxBulk:   { windHighKnots: 40, windMediumKnots: 28, ukcHighM: 1.0, ukcMediumM: 2.0 },
+  capesize:      { windHighKnots: 35, windMediumKnots: 25, ukcHighM: 1.5, ukcMediumM: 3.0 },
+  pctc:          { windHighKnots: 25, windMediumKnots: 18, ukcHighM: 1.0, ukcMediumM: 2.0 },
+  lng:           { windHighKnots: 30, windMediumKnots: 22, ukcHighM: 1.2, ukcMediumM: 2.5 },
 };

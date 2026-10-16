@@ -4,15 +4,16 @@ from fastapi.testclient import TestClient
 
 
 def test_get_default_ports(client: TestClient):
-    """GET /api/v1/ports/defaults returns standard default global ports without auth."""
+    """GET /api/v1/ports/defaults returns standard default global ports with NGA WPI depth data without auth."""
     resp = client.get("/api/v1/ports/defaults")
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) >= 6
     locodes = [p["locode"] for p in data]
     assert "NLRTM" in locodes
-    assert "SGSIN" in locodes
+    assert "SGKEP" in locodes
     assert all(p["isDefault"] is True for p in data)
+    assert all(p["channelDepthM"] is not None and p["channelDepthM"] > 0 for p in data)
 
 
 def test_search_ports(client: TestClient):
@@ -23,9 +24,9 @@ def test_search_ports(client: TestClient):
     assert any("Rotterdam" in p["name"] for p in resp.json())
 
     # Search by LOCODE
-    resp = client.get("/api/v1/ports/search?q=SGSIN")
+    resp = client.get("/api/v1/ports/search?q=SGKEP")
     assert resp.status_code == 200
-    assert any(p["locode"] == "SGSIN" for p in resp.json())
+    assert any(p["locode"] == "SGKEP" for p in resp.json())
 
     # Search by country
     resp = client.get("/api/v1/ports/search?q=Belgium")
@@ -159,43 +160,42 @@ def test_port_privacy_multi_tenant(
 
 
 def test_search_japan_and_canadian_ports(client: TestClient, auth_headers: dict):
-    """Verify UN/LOCODE Function=1 maritime ports with valid coordinates are accessible, while coordinate-less rows are excluded."""
-    # 1. Search Japan by country (returns first 50 of 113 Japanese ports with coordinates)
+    """Verify combined UN/LOCODE (Function=1) + NGA WPI (Channel Depth > 0) ports and single-file coordinate rule."""
+    # 1. Search Japan by country
     resp_jp = client.get("/api/v1/ports/search?q=Japan")
     assert resp_jp.status_code == 200
     jp_ports = resp_jp.json()
     assert len(jp_ports) >= 5
-    assert all(p["country"] == "Japan" for p in jp_ports)
+    assert all(p["country"] == "Japan" and p["channelDepthM"] > 0 for p in jp_ports)
 
-    # 2. Search Japanese ports with coordinates by LOCODE / name
+    # 2. Search Japanese ports by LOCODE / name
     for locode, expected_name in [("JPTYO", "Tokyo"), ("JPYOK", "Yokohama"), ("JPOSA", "Osaka"), ("JPUKB", "Kobe")]:
         resp = client.get(f"/api/v1/ports/search?q={locode}")
         assert resp.status_code == 200
-        assert any(p["locode"] == locode and expected_name in p["name"] for p in resp.json())
+        assert any(p["locode"] == locode and expected_name in p["name"] and p["channelDepthM"] > 0 for p in resp.json())
 
-
-    # 3. Search Canada by country (returns first 50 of 327 Canadian ports with coordinates in UN/LOCODE)
+    # 3. Search Canada by country
     resp_ca = client.get("/api/v1/ports/search?q=Canada")
     assert resp_ca.status_code == 200
     ca_ports = resp_ca.json()
     assert len(ca_ports) >= 5
-    assert all(p["country"] == "Canada" for p in ca_ports)
+    assert all(p["country"] == "Canada" and p["channelDepthM"] > 0 for p in ca_ports)
 
-    # 4. Search Canadian port that has coordinates in UN/LOCODE (e.g., Victoria CAVIC)
-    resp_vic = client.get("/api/v1/ports/search?q=CAVIC")
-    assert resp_vic.status_code == 200
-    assert any(p["locode"] == "CAVIC" and "Victoria" in p["name"] for p in resp_vic.json())
+    # 4. Search Canadian ports: CAVIC (coords in both) and CAMTR (coords taken from NGA WPI when blank in UN/LOCODE)
+    for locode, expected_name in [("CAVIC", "Victoria"), ("CAVAN", "Vancouver"), ("CAMTR", "Montreal")]:
+        resp = client.get(f"/api/v1/ports/search?q={locode}")
+        assert resp.status_code == 200
+        assert any(p["locode"] == locode and expected_name in p["name"] and p["channelDepthM"] > 0 for p in resp.json())
 
-    # 5. Ports lacking coordinates in the official UN/LOCODE dataset (e.g. CAMTR) are not imported
-    resp_montreal = client.get("/api/v1/ports/search?q=CAMTR")
-    assert resp_montreal.status_code == 200
-    assert not any(p["locode"] == "CAMTR" for p in resp_montreal.json())
-
-    # 6. Access risk evaluation directly by UN/LOCODE
+    # 5. Access risk evaluation directly by UN/LOCODE and verify real NGA WPI depth is used
     risk_resp = client.get("/api/v1/ports/JPTYO/risk?vesselClass=panamax")
     assert risk_resp.status_code == 200
     risk_data = risk_resp.json()
     assert risk_data["portId"] == "JPTYO"
     assert "weather" in risk_data["subRisks"]
     assert "congestion" in risk_data["subRisks"]
+    assert "navigational" in risk_data["subRisks"]
+    assert "terminalDelays" not in risk_data["subRisks"]
+    assert risk_data["metrics"]["navigational"]["channelDepthM"] == 15.5
+
 

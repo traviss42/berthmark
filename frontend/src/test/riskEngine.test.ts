@@ -1,23 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import { assessRisk, computeCompositeTier } from '@/services/riskEngine';
-import type { PortMetrics, SubRiskResult, SubRiskCategory, RiskTier, VesselClass } from '@/types';
+import type { PortMetrics, SubRiskResult, RiskTier } from '@/types';
 
 function createSampleMetrics(portId: string = 'test-port'): PortMetrics {
   return {
     portId,
     timestamp: '2026-10-16T00:00:00Z',
     congestion: {
-      anchorageQueueCount: 10,
-      avgWaitingTimeHours: 18.0,
-      berthOccupancyPct: 70.0,
+      anchorageQueueCount: 8,
+      activeVesselCount: 22,
+      movingVesselCount: 14,
       rolling30dAvgQueue: 9.0,
-      rolling30dAvgWaitHours: 16.0,
-    },
-    terminal: {
-      berthTurnaroundHours: 28.0,
-      berthToAnchorageWaitRatio: 0.45,
-      dwellTimeAnomalyScore: 30.0,
-      rolling30dAvgTurnaround: 26.0,
     },
     weather: {
       windSpeedKnots: 15.0,
@@ -27,11 +20,17 @@ function createSampleMetrics(portId: string = 'test-port'): PortMetrics {
       gustSpeedKnots: 20.0,
     },
     navigational: {
-      underKeelClearanceM: 3.0,
+      underKeelClearanceM: 3.5,
       channelDepthM: 16.0,
-      airDraftClearanceM: 10.0,
+      cargoPierDepthM: 16.5,
+      anchorageDepthM: 18.0,
+      vesselDraftM: 12.5,
+      overheadLimits: 'No',
       pilotageAvailable: true,
+      tugsAssistance: true,
       tideHeightM: 1.5,
+      harborSize: 'Large',
+      shelterAfforded: 'Good',
     },
   };
 }
@@ -50,7 +49,6 @@ describe('Risk Engine - Composite Tier (Weakest-Link Rule)', () => {
   it('returns high when any sub-risk is high', () => {
     const subRisks = {
       congestion: makeSubRisk('low'),
-      terminalDelays: makeSubRisk('low'),
       weather: makeSubRisk('high'),
       navigational: makeSubRisk('low'),
     };
@@ -58,10 +56,9 @@ describe('Risk Engine - Composite Tier (Weakest-Link Rule)', () => {
     expect(result.tier).toBe('high');
   });
 
-  it('returns high even if only one of four is high', () => {
+  it('returns high even if only one of three is high', () => {
     const subRisks = {
       congestion: makeSubRisk('low'),
-      terminalDelays: makeSubRisk('low'),
       weather: makeSubRisk('low'),
       navigational: makeSubRisk('high'),
     };
@@ -71,8 +68,7 @@ describe('Risk Engine - Composite Tier (Weakest-Link Rule)', () => {
   it('returns medium when highest sub-risk is medium', () => {
     const subRisks = {
       congestion: makeSubRisk('low'),
-      terminalDelays: makeSubRisk('medium'),
-      weather: makeSubRisk('low'),
+      weather: makeSubRisk('medium'),
       navigational: makeSubRisk('low'),
     };
     expect(computeCompositeTier(subRisks).tier).toBe('medium');
@@ -81,7 +77,6 @@ describe('Risk Engine - Composite Tier (Weakest-Link Rule)', () => {
   it('returns low when all sub-risks are low', () => {
     const subRisks = {
       congestion: makeSubRisk('low'),
-      terminalDelays: makeSubRisk('low'),
       weather: makeSubRisk('low'),
       navigational: makeSubRisk('low'),
     };
@@ -91,7 +86,6 @@ describe('Risk Engine - Composite Tier (Weakest-Link Rule)', () => {
   it('prioritizes high over medium', () => {
     const subRisks = {
       congestion: makeSubRisk('medium'),
-      terminalDelays: makeSubRisk('medium'),
       weather: makeSubRisk('high'),
       navigational: makeSubRisk('low'),
     };
@@ -100,7 +94,7 @@ describe('Risk Engine - Composite Tier (Weakest-Link Rule)', () => {
 });
 
 describe('Risk Engine - assessRisk', () => {
-  it('produces a complete risk assessment with all sub-risks', () => {
+  it('produces a complete risk assessment with all 3 real sub-risks', () => {
     const metrics = createSampleMetrics('port-test');
     const assessment = assessRisk('port-test', 'Test Port', 'panamax', metrics);
 
@@ -109,7 +103,6 @@ describe('Risk Engine - assessRisk', () => {
     expect(assessment.vesselClass).toBe('panamax');
     expect(assessment.compositeTier).toMatch(/^(low|medium|high)$/);
     expect(assessment.subRisks.congestion).toBeDefined();
-    expect(assessment.subRisks.terminalDelays).toBeDefined();
     expect(assessment.subRisks.weather).toBeDefined();
     expect(assessment.subRisks.navigational).toBeDefined();
   });
@@ -164,3 +157,4 @@ describe('Risk Engine - Weather assessment by vessel class', () => {
     expect(feederAssessment.subRisks.weather.tier).toBe('low');
   });
 });
+

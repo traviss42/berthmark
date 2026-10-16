@@ -161,7 +161,8 @@ class NotificationService:
         wind_speed = 0.0
         wave_height = 0.0
         queue_count = 0
-        berth_occupancy = 60.0
+        active_vessels = 0
+        channel_depth = port.channelDepthM or 0.0
 
         try:
             from app.services.risk_service import risk_service
@@ -174,9 +175,10 @@ class NotificationService:
             tier = assessment.compositeTier
             score = assessment.compositeScore
             wind_speed = assessment.metrics.weather.windSpeedKnots
-            wave_height = assessment.metrics.weather.waveHeightMeters
+            wave_height = assessment.metrics.weather.waveHeightM
             queue_count = assessment.metrics.congestion.anchorageQueueCount
-            berth_occupancy = assessment.metrics.congestion.berthOccupancyPct
+            active_vessels = assessment.metrics.congestion.activeVesselCount
+            channel_depth = assessment.metrics.navigational.channelDepthM
         except Exception:
             pass
 
@@ -186,7 +188,7 @@ class NotificationService:
             f"Successfully subscribed to alerts for {port.name} [{port.locode}]. "
             f"Current baseline risk: {tier_label} (Score: {score:.1f}/100, "
             f"Wind: {wind_speed:.1f} kts, Waves: {wave_height:.1f}m, "
-            f"Anchorage Queue: {queue_count} vessels, Berth Occupancy: {berth_occupancy:.1f}%). "
+            f"Anchorage Queue: {queue_count} vessels, Channel Depth: {channel_depth:.1f}m). "
             f"Alerts active for {recipient_email}."
         )
 
@@ -220,8 +222,8 @@ class NotificationService:
             f"  • Composite Risk Tier: {tier_label} (Score: {score:.1f}/100)\n"
             f"  • Wind Speed: {wind_speed:.1f} knots\n"
             f"  • Significant Wave Height: {wave_height:.1f} meters\n"
-            f"  • Anchorage Waiting Queue: {queue_count} vessels\n"
-            f"  • Berth Occupancy: {berth_occupancy:.1f}%\n\n"
+            f"  • Anchorage Waiting Queue: {queue_count} vessels ({active_vessels} total active in geofence)\n"
+            f"  • Controlling Channel Depth (NGA WPI): {channel_depth:.1f}m\n\n"
             f"You will automatically receive an email alert whenever weather or traffic triggers a risk state transition.\n"
             f"You can opt out per-port at any time in your Monitored Ports portfolio.\n"
         )
