@@ -1,10 +1,12 @@
-"""Notification service managing in-app alerts and risk state transitions."""
+"""Notification service managing in-app alerts and risk state transitions with database persistence."""
 
 import time
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 from fastapi import HTTPException, status
+from app.db.models import MonitoredPort, NotificationRecord
+from app.db.session import get_db_context
 from app.models.common import RiskTier
 from app.models.notification import CreateAlertRequest, Notification
 
@@ -16,45 +18,58 @@ TIER_LABELS: Dict[RiskTier, str] = {
 
 
 class NotificationService:
-    """Manages user alerts, state-change triggers, and read status."""
-
-    def __init__(self):
-        # user_id -> List[Notification]
-        self._user_notifications: Dict[str, List[Notification]] = {}
+    """Manages user alerts, state-change triggers, and read status backed by SQLAlchemy database."""
 
     async def get_notifications(
         self, user_id: str, unread_only: bool = False
     ) -> List[Notification]:
-        """Retrieve user notifications in reverse chronological order."""
-        notifs = self._user_notifications.get(user_id, [])
-        if unread_only:
-            notifs = [n for n in notifs if not n.read]
-        # Return newest first
-        return list(reversed(notifs))
+        """Retrieve user notifications in reverse chronological order from the database."""
+        with get_db_context() as db:
+            query = db.query(NotificationRecord).filter(NotificationRecord.user_id == user_id)
+            if unread_only:
+                query = query.filter(NotificationRecord.read.is_(False))
+
+            records = (
+                query.order_by(NotificationRecord.created_at.desc(), NotificationRecord.id.desc())
+                .all()
+            )
+            return [r.to_pydantic() for r in records]
 
     async def mark_as_read(self, notification_id: str, user_id: str) -> Notification:
-        """Mark a specific notification as read."""
-        notifs = self._user_notifications.get(user_id, [])
-        for n in notifs:
-            if n.id == notification_id:
-                n.read = True
-                return n
+        """Mark a specific notification as read in the database."""
+        with get_db_context() as db:
+            record = (
+                db.query(NotificationRecord)
+                .filter(
+                    NotificationRecord.id == notification_id,
+                    NotificationRecord.user_id == user_id,
+                )
+                .first()
+            )
+            if not record:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Notification with ID '{notification_id}' not found.",
+                )
 
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Notification with ID '{notification_id}' not found.",
-        )
+            record.read = True
+            db.commit()
+            db.refresh(record)
+            return record.to_pydantic()
 
     async def mark_all_as_read(self, user_id: str) -> None:
-        """Mark all notifications for this user as read."""
-        notifs = self._user_notifications.get(user_id, [])
-        for n in notifs:
-            n.read = True
+        """Mark all notifications for this user as read in the database."""
+        with get_db_context() as db:
+            db.query(NotificationRecord).filter(
+                NotificationRecord.user_id == user_id,
+                NotificationRecord.read.is_(False),
+            ).update({"read": True}, synchronize_session=False)
+            db.commit()
 
     async def create_alert(
         self, alert_req: CreateAlertRequest, user_id: str
     ) -> Notification:
-        """Create a state-change alert notification."""
+        """Create a state-change alert notification persisted to the database."""
         notif_id = f"notif-{int(time.time())}-{uuid.uuid4().hex[:6]}"
         now_str = datetime.now(timezone.utc).isoformat()
 
@@ -72,38 +87,42 @@ class NotificationService:
             else f"{alert_req.portName} initial risk assessment: {new_label}."
         )
 
-        # Check if user has opted out of notifications for this port
+        # Check if user has opted out of notifications for this port in the database
         port_notifications_enabled = True
-        try:
-            from app.services.port_service import port_service
-            user_ports = port_service._user_ports.get(user_id, {})
-            monitored_port = user_ports.get(alert_req.portId)
-            if monitored_port and not monitored_port.notificationsEnabled:
+        with get_db_context() as db:
+            monitored_port = (
+                db.query(MonitoredPort)
+                .filter(
+                    MonitoredPort.id == alert_req.portId,
+                    MonitoredPort.user_id == user_id,
+                )
+                .first()
+            )
+            if monitored_port and not monitored_port.notifications_enabled:
                 port_notifications_enabled = False
-        except Exception:
-            pass
 
-        recipient_email = None
-        if port_notifications_enabled:
-            recipient_email = user_id if "@" in user_id else f"{user_id}@berthmark.com"
+            recipient_email = None
+            if port_notifications_enabled:
+                recipient_email = user_id if "@" in user_id else f"{user_id}@berthmark.com"
 
-        notification = Notification(
-            id=notif_id,
-            type="stateChange",
-            portId=alert_req.portId,
-            portName=alert_req.portName,
-            title=title,
-            message=message,
-            tier=alert_req.newTier,
-            previousTier=alert_req.previousTier,
-            timestamp=now_str,
-            read=False,
-            recipientEmail=recipient_email,
-        )
-
-        if user_id not in self._user_notifications:
-            self._user_notifications[user_id] = []
-        self._user_notifications[user_id].append(notification)
+            record = NotificationRecord(
+                id=notif_id,
+                user_id=user_id,
+                type="stateChange",
+                port_id=alert_req.portId,
+                port_name=alert_req.portName,
+                title=title,
+                message=message,
+                tier=alert_req.newTier,
+                previous_tier=alert_req.previousTier,
+                timestamp=now_str,
+                read=False,
+                recipient_email=recipient_email,
+            )
+            db.add(record)
+            db.commit()
+            db.refresh(record)
+            notification = record.to_pydantic()
 
         # Dispatch email if recipient is enabled
         if recipient_email:
@@ -171,23 +190,25 @@ class NotificationService:
             f"Alerts active for {recipient_email}."
         )
 
-        notification = Notification(
-            id=notif_id,
-            type="stateChange",
-            portId=port.id,
-            portName=port.name,
-            title=title,
-            message=message,
-            tier=tier,
-            previousTier=None,
-            timestamp=now_str,
-            read=False,
-            recipientEmail=recipient_email,
-        )
-
-        if user_id not in self._user_notifications:
-            self._user_notifications[user_id] = []
-        self._user_notifications[user_id].append(notification)
+        with get_db_context() as db:
+            record = NotificationRecord(
+                id=notif_id,
+                user_id=user_id,
+                type="stateChange",
+                port_id=port.id,
+                port_name=port.name,
+                title=title,
+                message=message,
+                tier=tier,
+                previous_tier=None,
+                timestamp=now_str,
+                read=False,
+                recipient_email=recipient_email,
+            )
+            db.add(record)
+            db.commit()
+            db.refresh(record)
+            notification = record.to_pydantic()
 
         # Dispatch email
         email_body = (

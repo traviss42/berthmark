@@ -79,14 +79,15 @@ Built to comply with international maritime guidelines (**PIANC Report 121**) an
        │                       │
        ▼                       ▼
 ┌──────────────┐    ┌────────────────────┐    ┌───────────────┐
-│  UN/LOCODE   │    │    Open-Meteo      │    │   AISStream   │
-│  SQLite DB   │    │  Marine & Forecast │    │   WebSocket   │
-│ (100k+ Ports)│    │   (Live Weather)   │    │(Live AIS/MMSI)│
+│  SQLAlchemy  │    │    Open-Meteo      │    │   AISStream   │
+│ Database URL │    │  Marine & Forecast │    │   WebSocket   │
+│(SQLite / PG) │    │   (Live Weather)   │    │(Live AIS/MMSI)│
 └──────────────┘    └────────────────────┘    └───────────────┘
 ```
 
 - **Frontend:** React 18, TypeScript, Tailwind CSS, Vite, Lucide Icons, Vitest.
-- **Backend:** Python 3.11+, FastAPI, Pydantic v2, Uvicorn, httpx, websockets, pytest.
+- **Backend:** Python 3.11+, FastAPI, SQLAlchemy 2.0+, Pydantic v2, Uvicorn, httpx, websockets, pytest.
+- **Database Layer:** Database-agnostic SQLAlchemy ORM with connection pooling. Driven by `DATABASE_URL` (SQLite file by default, ready for PostgreSQL, MySQL, etc.).
 - **Version Management:**
   - Node managed via `fnm` (Fast Node Manager).
   - Python managed via `pyenv` with an isolated local virtual environment (`backend/.venv`).
@@ -148,9 +149,16 @@ Copy the example configuration to `backend/.env`:
 cp backend/.env.example backend/.env
 ```
 
-Edit `backend/.env` to configure your settings. To enable live vessel tracking via AISStream, provide your free API key from [aisstream.io](https://aisstream.io):
+Edit `backend/.env` to configure your settings.
 
 ```env
+# Database Configuration (Database-Agnostic SQLAlchemy URL)
+# SQLite (default):
+DATABASE_URL=sqlite:///backend/data/berthmark.db
+# PostgreSQL (example):
+# DATABASE_URL=postgresql+psycopg2://user:password@localhost:5432/berthmark
+
+# Live AISStream vessel tracking (Optional: free API key from aisstream.io)
 AISSTREAM_API_KEY=your_aisstream_api_key_here
 ```
 
@@ -258,7 +266,7 @@ Berthmark includes full test suites covering business logic, weakest-link scorin
 make test
 
 # Or run separately
-make test-backend    # 33 passed
+make test-backend    # 37 passed
 make test-frontend   # 39 passed
 ```
 
@@ -300,18 +308,21 @@ berthmark/
 │   ├── app/
 │   │   ├── auth/             # Bearer authentication & user isolation dependencies
 │   │   ├── clients/          # External API clients (AISStream WS, Open-Meteo, UN/LOCODE SQLite)
+│   │   ├── db/               # SQLAlchemy database layer (Base, models, session, engine)
 │   │   ├── models/           # Pydantic v2 schemas (Port, RiskAssessment, Notifications, Auth)
 │   │   ├── routers/          # FastAPI REST endpoints (/ports, /risk, /notifications, /auth)
-│   │   ├── services/         # Risk computation engine, weakest-link evaluator, port service
-│   │   ├── config.py         # Application settings via pydantic-settings
-│   │   └── main.py           # FastAPI application entrypoint and middleware
+│   │   ├── services/         # Risk computation engine, weakest-link evaluator, port service, email service
+│   │   ├── config.py         # Application settings via pydantic-settings (DATABASE_URL, etc.)
+│   │   └── main.py           # FastAPI application entrypoint, lifespan DB init, and middleware
 │   ├── data/
 │   │   ├── maritime_ports.json  # Seed dataset of major global maritime hubs
-│   │   └── unlocode.db          # Embedded SQLite database of UN/LOCODE locations
+│   │   ├── unlocode.db          # Embedded SQLite database of UN/LOCODE locations
+│   │   └── berthmark.db         # Default SQLite operational database (monitored ports, notifications)
 │   ├── scripts/
 │   │   ├── import_unlocode.py   # CLI tool to seed and import full UNECE CSV releases
 │   │   └── test_apis.py         # Standalone external API connectivity probe
-│   ├── tests/                   # Pytest test suite (test_auth, test_ports, test_risk, etc.)
+│   ├── tests/                   # Pytest test suite (test_database, test_auth, test_ports, etc.)
+│   │   ├── test_database.py     # Database engine, URL resolution, and SQLAlchemy CRUD tests
 │   │   ├── test_auth.py         # Login, logout, profile, and authorization tests
 │   │   ├── test_ports.py        # Port management, search, and notification opt-in/opt-out
 │   │   └── ...

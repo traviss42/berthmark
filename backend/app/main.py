@@ -1,13 +1,21 @@
-"""Main FastAPI application entry point for Berthmark backend."""
-
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.config import get_settings
+from app.db import init_db
 from app.models.error import ErrorResponse
 from app.routers import auth_router, notifications_router, ports_router, risk_router
 
 settings = get_settings()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager initializing database tables on startup."""
+    init_db()
+    yield
+
 
 app = FastAPI(
     title="Berthmark API",
@@ -16,6 +24,7 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",
+    lifespan=lifespan,
 )
 
 # CORS middleware for React frontend integration

@@ -1,0 +1,87 @@
+"""Database engine and session management supporting SQLite and arbitrary SQL databases."""
+
+import os
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Generator, Optional
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import sessionmaker, Session
+from app.config import get_settings
+from app.db.base import Base
+
+
+def resolve_database_url(url: Optional[str] = None) -> str:
+    """Resolve database connection URL from settings or parameter, handling relative SQLite paths."""
+    if not url:
+        settings = get_settings()
+        url = settings.DATABASE_URL
+
+    # Handle SQLite file path resolution when running from root or backend/
+    if url.startswith("sqlite:///") and not url.startswith("sqlite:///:memory:"):
+        sqlite_path = url[len("sqlite:///"):]
+        p = Path(sqlite_path)
+        if not p.is_absolute():
+            if p.exists() or p.parent.exists():
+                resolved_path = str(p)
+            elif p.parts and p.parts[0] == "backend":
+                sub = Path(*p.parts[1:])
+                if sub.exists() or sub.parent.exists():
+                    resolved_path = str(sub)
+                else:
+                    resolved_path = str(p)
+            else:
+                resolved_path = str(p)
+
+            # Ensure directory exists for sqlite database file
+            Path(resolved_path).parent.mkdir(parents=True, exist_ok=True)
+            return f"sqlite:///{resolved_path}"
+
+    return url
+
+
+def create_app_engine(database_url: Optional[str] = None) -> Engine:
+    """Create a database engine with dialect-specific options (e.g. check_same_thread for SQLite)."""
+    url = resolve_database_url(database_url)
+    connect_args = {}
+    if url.startswith("sqlite"):
+        connect_args["check_same_thread"] = False
+
+    return create_engine(url, connect_args=connect_args)
+
+
+engine = create_app_engine()
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+def init_db(target_engine: Optional[Engine] = None) -> None:
+    """Create all tables defined on Base if they do not exist."""
+    # Ensure models are imported so their metadata is registered on Base
+    from app.db import models  # noqa: F401
+
+    eng = target_engine or engine
+    Base.metadata.create_all(bind=eng)
+
+
+def get_db() -> Generator[Session, None, None]:
+    """FastAPI dependency yielding a scoped database session."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+@contextmanager
+def get_db_context(target_sessionmaker=None) -> Generator[Session, None, None]:
+    """Context manager for database sessions outside request scope (e.g. services, background jobs)."""
+    sm = target_sessionmaker or SessionLocal
+    db: Session = sm()
+    try:
+        yield db
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()

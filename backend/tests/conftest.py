@@ -1,20 +1,25 @@
-"""Pytest test fixtures and configuration."""
+"""Pytest test fixtures and configuration with database isolation."""
 
 import pytest
 from fastapi.testclient import TestClient
+from app.db import init_db, get_db_context
+from app.db.models import MonitoredPort, NotificationRecord
 from app.main import app
-from app.services.port_service import PortService, port_service
-from app.services.notification_service import NotificationService, notification_service
-from app.services.risk_service import RiskService, risk_service
+
+
+@pytest.fixture(scope="session", autouse=True)
+def setup_test_db():
+    """Ensure database schema is initialized for testing session."""
+    init_db()
 
 
 @pytest.fixture(autouse=True)
-def reset_services():
-    """Reset service in-memory stores before each test to maintain test isolation."""
-    # Reset user ports
-    port_service._user_ports.clear()
-    # Reset notifications
-    notification_service._user_notifications.clear()
+def reset_database():
+    """Clear database tables before each test to maintain strict test isolation."""
+    with get_db_context() as db:
+        db.query(NotificationRecord).delete()
+        db.query(MonitoredPort).delete()
+        db.commit()
     yield
 
 

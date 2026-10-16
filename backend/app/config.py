@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     UNLOCODE_DB_PATH: str = "backend/data/unlocode.db"
     UNLOCODE_SEED_PATH: str = "backend/data/maritime_ports.json"
 
+    # Database Configuration (database-agnostic SQLAlchemy URL)
+    # Default is SQLite file; can be configured to PostgreSQL, etc. via DATABASE_URL env var
+    DATABASE_URL: str = "sqlite:///backend/data/berthmark.db"
+
     # HTTP Client Configuration
     HTTP_TIMEOUT_SECONDS: float = Field(default=5.0, ge=1.0, le=60.0)
 
