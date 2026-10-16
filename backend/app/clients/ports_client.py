@@ -1,8 +1,8 @@
-"""Client for external UN/LOCODE and World Port Index registry with fallback data."""
+"""Port directory client integrating local UN/LOCODE database with fallback catalog."""
 
 import logging
 from typing import List, Optional
-import httpx
+from app.clients.unlocode_db import UnlocodeDatabase
 from app.config import get_settings
 from app.models.port import Port
 
@@ -32,12 +32,24 @@ FALLBACK_GLOBAL_PORTS: List[dict] = [
 
 
 class PortDirectoryClient:
-    """Client for port reference and geocoding directory with fallback lookup."""
+    """Client for port reference and UN/LOCODE directory search using local SQLite database."""
 
-    def __init__(self, base_url: Optional[str] = None, timeout: Optional[float] = None):
+    def __init__(
+        self,
+        base_url: Optional[str] = None,
+        timeout: Optional[float] = None,
+        db: Optional[UnlocodeDatabase] = None,
+    ):
         settings = get_settings()
         self.base_url = base_url or settings.PORTS_API_BASE_URL
         self.timeout = timeout or settings.HTTP_TIMEOUT_SECONDS
+        self._db = db
+
+    @property
+    def db(self) -> UnlocodeDatabase:
+        if self._db is None:
+            self._db = UnlocodeDatabase()
+        return self._db
 
     def _fallback_search(self, query: str) -> List[Port]:
         q = query.lower().strip()
@@ -54,21 +66,30 @@ class PortDirectoryClient:
         return results
 
     async def search_ports(self, query: str) -> List[Port]:
-        """Search global port registry by query."""
-        if not query.strip():
+        """Search global UN/LOCODE port registry by LOCODE, port name, or country."""
+        q = query.strip()
+        if not q:
             return []
 
-        # If external registry URL is configured and network available
-        if self.base_url.startswith("http"):
-            try:
-                async with httpx.AsyncClient(timeout=self.timeout) as client:
-                    resp = await client.get(
-                        f"{self.base_url}/search", params={"query": query.strip()}
-                    )
-                    if resp.status_code == 200:
-                        items = resp.json()
-                        return [Port(**item) for item in items]
-            except Exception as e:
-                logger.debug("External port search failed: %s; falling back to local dataset.", str(e))
+        try:
+            results = self.db.search_ports(q, limit=50)
+            if results:
+                return results
+        except Exception as e:
+            logger.debug("Database port search error: %s; falling back to memory catalog.", str(e))
 
-        return self._fallback_search(query)
+        return self._fallback_search(q)
+
+    def get_port_by_locode(self, locode: str) -> Optional[Port]:
+        """Retrieve port by UN/LOCODE."""
+        try:
+            port = self.db.get_port_by_locode(locode)
+            if port:
+                return port
+        except Exception:
+            pass
+
+        for p in FALLBACK_GLOBAL_PORTS:
+            if p["locode"].upper() == locode.upper():
+                return Port(**p)
+        return None

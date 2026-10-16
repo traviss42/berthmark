@@ -61,8 +61,41 @@ To run frontend tests:
 npm run test # or npx vitest run
 ```
 
+### Backend Setup
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+```
+
+To run backend tests:
+
+```bash
+pytest tests/ -v
+```
+
+---
+
+## UN/LOCODE Data Management
+
+UNECE distributes UN/LOCODE biannually as flat CSV/text files rather than an online REST API. Berthmark incorporates UN/LOCODE via an embedded, high-performance SQLite database:
+
+- **Built-in Seeding:** Out of the box, Berthmark auto-seeds [`backend/data/maritime_ports.json`](backend/data/maritime_ports.json) into `backend/data/unlocode.db`, providing instant search for top global maritime ports.
+- **Importing Full UNECE Releases:** When downloading the complete official UNECE CSV releases (~110,000 locations), run the CLI importer to filter for waterborne ports (`Function` 1) and parse standard coordinates:
+  ```bash
+  # Import a single UNECE CSV file:
+  python backend/scripts/import_unlocode.py --csv path/to/2024-1_CodeList.csv
+
+  # Import directory of UNECE part files:
+  python backend/scripts/import_unlocode.py --dir path/to/csv_parts/
+  ```
+
 ---
 
 ## Documentation
 
 See [`docs/plan.md`](docs/plan.md) for the detailed MVP architecture, scoring logic, and data ingestion model.
+

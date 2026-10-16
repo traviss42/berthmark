@@ -22,11 +22,13 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "berthmark-development-secret-key-change-in-production"
     ALLOWED_ORIGINS: str = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173"
 
-    # External APIs
+    # External APIs & Datasets
     OPENMETEO_BASE_URL: str = "https://marine-api.open-meteo.com/v1/marine"
     AISSTREAM_API_KEY: str = ""
     AISSTREAM_BASE_URL: str = "https://api.aisstream.io/v1"
     PORTS_API_BASE_URL: str = "https://raw.githubusercontent.com/datasets/un-locode/master"
+    UNLOCODE_DB_PATH: str = "backend/data/unlocode.db"
+    UNLOCODE_SEED_PATH: str = "backend/data/maritime_ports.json"
 
     # HTTP Client Configuration
     HTTP_TIMEOUT_SECONDS: float = Field(default=5.0, ge=1.0, le=60.0)
