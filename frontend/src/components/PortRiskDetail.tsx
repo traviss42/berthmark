@@ -1,4 +1,4 @@
-import { ArrowLeft, MapPin, Trash2, RefreshCw, Wind, Waves, Eye, Compass, Anchor, Clock } from 'lucide-react';
+import { ArrowLeft, MapPin, Trash2, RefreshCw, Wind, Waves, Eye, Compass, Anchor, Clock, Bell, BellOff, Mail } from 'lucide-react';
 import type { RiskAssessment } from '@/types';
 import { RiskBadge } from './RiskBadge';
 import { SubRiskBreakdown } from './SubRiskBreakdown';
@@ -11,9 +11,22 @@ interface Props {
   canRemove: boolean;
   onRefresh: () => void;
   refreshing: boolean;
+  notificationsEnabled?: boolean;
+  onToggleNotifications?: (enabled: boolean) => void;
+  userEmail?: string;
 }
 
-export function PortRiskDetail({ assessment, onBack, onRemove, canRemove, onRefresh, refreshing }: Props) {
+export function PortRiskDetail({
+  assessment,
+  onBack,
+  onRemove,
+  canRemove,
+  onRefresh,
+  refreshing,
+  notificationsEnabled = true,
+  onToggleNotifications,
+  userEmail,
+}: Props) {
   const m = assessment.metrics;
   const compositeColors = TIER_COLORS[assessment.compositeTier];
 
@@ -57,6 +70,51 @@ export function PortRiskDetail({ assessment, onBack, onRemove, canRemove, onRefr
             </button>
           )}
         </div>
+      </div>
+
+      {/* Email Notifications Settings Card */}
+      <div className="rounded-xl border border-slate-200 bg-white p-4 flex items-center justify-between gap-4 flex-wrap shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${
+            notificationsEnabled ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-400'
+          }`}>
+            {notificationsEnabled ? <Bell className="w-5 h-5" /> : <BellOff className="w-5 h-5" />}
+          </div>
+          <div>
+            <div className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+              <span>Email Risk Alerts</span>
+              {notificationsEnabled ? (
+                <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                  Active
+                </span>
+              ) : (
+                <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                  Opted Out
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1">
+              <Mail className="w-3 h-3 text-slate-400" />
+              {notificationsEnabled
+                ? `Alerts dispatched to: ${userEmail || 'login email'}`
+                : 'Email alerts are disabled for this port.'}
+            </p>
+          </div>
+        </div>
+
+        {onToggleNotifications && (
+          <button
+            type="button"
+            onClick={() => onToggleNotifications(!notificationsEnabled)}
+            className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all cursor-pointer ${
+              notificationsEnabled
+                ? 'border-slate-300 text-slate-700 bg-white hover:bg-slate-50'
+                : 'border-blue-600 text-white bg-blue-600 hover:bg-blue-700'
+            }`}
+          >
+            {notificationsEnabled ? 'Opt Out of Alerts' : 'Opt In to Alerts'}
+          </button>
+        )}
       </div>
 
       {/* Composite Score Banner */}

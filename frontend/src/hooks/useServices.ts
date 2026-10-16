@@ -4,7 +4,7 @@ import { getServices } from '@/services';
 
 const MOCK_USER_ID = 'mock-user';
 
-export function usePorts() {
+export function usePorts(userId: string = MOCK_USER_ID) {
   const [ports, setPorts] = useState<Port[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -14,14 +14,14 @@ export function usePorts() {
     setLoading(true);
     setError(null);
     try {
-      const data = await services.ports.getPorts(MOCK_USER_ID);
+      const data = await services.ports.getPorts(userId);
       setPorts(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load ports');
     } finally {
       setLoading(false);
     }
-  }, [services]);
+  }, [services, userId]);
 
   useEffect(() => {
     refresh();
@@ -29,22 +29,31 @@ export function usePorts() {
 
   const addPort = useCallback(
     async (port: Omit<Port, 'id' | 'isDefault' | 'addedByUserId'>) => {
-      const created = await services.ports.addPort(port, MOCK_USER_ID);
+      const created = await services.ports.addPort(port, userId);
       setPorts((prev) => [...prev, created]);
       return created;
     },
-    [services]
+    [services, userId]
   );
 
   const removePort = useCallback(
     async (portId: string) => {
-      await services.ports.removePort(portId, MOCK_USER_ID);
+      await services.ports.removePort(portId, userId);
       setPorts((prev) => prev.filter((p) => p.id !== portId));
     },
-    [services]
+    [services, userId]
   );
 
-  return { ports, loading, error, refresh, addPort, removePort };
+  const toggleNotifications = useCallback(
+    async (portId: string, enabled: boolean) => {
+      const updated = await services.ports.updatePortNotifications(portId, enabled, userId);
+      setPorts((prev) => prev.map((p) => (p.id === portId ? updated : p)));
+      return updated;
+    },
+    [services, userId]
+  );
+
+  return { ports, loading, error, refresh, addPort, removePort, toggleNotifications };
 }
 
 export function useRiskAssessments(
@@ -88,7 +97,7 @@ export function useRiskAssessments(
   return { assessments, loading, error, refresh };
 }
 
-export function useNotifications() {
+export function useNotifications(userId: string = MOCK_USER_ID) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const services = getServices();
@@ -96,14 +105,14 @@ export function useNotifications() {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await services.notifications.getNotifications(MOCK_USER_ID);
+      const data = await services.notifications.getNotifications(userId);
       setNotifications(data);
     } catch {
       // silent
     } finally {
       setLoading(false);
     }
-  }, [services]);
+  }, [services, userId]);
 
   useEffect(() => {
     refresh();
@@ -120,9 +129,9 @@ export function useNotifications() {
   );
 
   const markAllAsRead = useCallback(async () => {
-    await services.notifications.markAllAsRead(MOCK_USER_ID);
+    await services.notifications.markAllAsRead(userId);
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-  }, [services]);
+  }, [services, userId]);
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 

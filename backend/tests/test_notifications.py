@@ -93,3 +93,48 @@ def test_notification_multi_tenant_isolation(
     resp_user2 = client.get("/api/v1/notifications", headers=user2_auth_headers)
     assert resp_user2.status_code == 200
     assert len(resp_user2.json()) == 0
+
+
+def test_notification_sent_to_login_email_and_opt_out_respected(client: TestClient):
+    """Verify notification recipientEmail is the login email when opted in, and None when opted out."""
+    email_headers = {"Authorization": "Bearer portmanager@shippingcorp.com"}
+
+    # 1. Add port (opted in by default)
+    add_resp = client.post(
+        "/api/v1/ports",
+        json={"name": "Alert Port", "locode": "XXALT", "country": "Test", "lat": 1.0, "lon": 1.0},
+        headers=email_headers,
+    )
+    assert add_resp.status_code == 201
+    port_id = add_resp.json()["id"]
+
+    # 2. Trigger alert for this port -> recipientEmail should be the login email
+    alert_1 = {
+        "portId": port_id,
+        "portName": "Alert Port",
+        "newTier": "high",
+        "previousTier": "low",
+    }
+    notif_resp_1 = client.post("/api/v1/notifications/alerts", json=alert_1, headers=email_headers)
+    assert notif_resp_1.status_code == 201
+    assert notif_resp_1.json()["recipientEmail"] == "portmanager@shippingcorp.com"
+
+    # 3. Opt out of notifications for this port
+    opt_out_resp = client.patch(
+        f"/api/v1/ports/{port_id}/notifications",
+        json={"notificationsEnabled": False},
+        headers=email_headers,
+    )
+    assert opt_out_resp.status_code == 200
+
+    # 4. Trigger another alert -> recipientEmail should be None (email alerts opted out)
+    alert_2 = {
+        "portId": port_id,
+        "portName": "Alert Port",
+        "newTier": "medium",
+        "previousTier": "high",
+    }
+    notif_resp_2 = client.post("/api/v1/notifications/alerts", json=alert_2, headers=email_headers)
+    assert notif_resp_2.status_code == 201
+    assert notif_resp_2.json()["recipientEmail"] is None
+

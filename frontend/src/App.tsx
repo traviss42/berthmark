@@ -1,23 +1,57 @@
 import { useState, useMemo, useCallback } from 'react';
-import { Bell, Globe, RefreshCw, Activity, AlertTriangle } from 'lucide-react';
-import type { VesselClass } from '@/types';
+import {
+  Bell,
+  Globe,
+  RefreshCw,
+  Activity,
+  AlertTriangle,
+  LogOut,
+  Mail,
+  User as UserIcon,
+} from 'lucide-react';
+import type { VesselClass, User } from '@/types';
 import { usePorts, useRiskAssessments, useNotifications } from '@/hooks/useServices';
+import { useAuth } from '@/context/AuthContext';
+import { LoginScreen } from '@/components/LoginScreen';
 import { PortList } from '@/components/PortList';
 import { PortSearch } from '@/components/PortSearch';
 import { PortRiskDetail } from '@/components/PortRiskDetail';
 import { VesselClassSelector } from '@/components/VesselClassSelector';
 import { NotificationPanel } from '@/components/NotificationPanel';
-import { getServices } from '@/services';
 
 export default function App() {
+  const { user, loading: authLoading } = useAuth();
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 border-4 border-blue-400/30 border-t-blue-400 rounded-full animate-spin" />
+          <p className="text-sm text-slate-400">Loading BerthMark...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginScreen />;
+  }
+
+  return <Dashboard user={user} />;
+}
+
+function Dashboard({ user }: { user: User }) {
+  const { logout } = useAuth();
   const {
     ports,
     loading: portsLoading,
     error: portsError,
     addPort,
     removePort,
+    toggleNotifications,
     refresh: refreshPorts,
-  } = usePorts();
+  } = usePorts(user.email);
+
   const [vesselClass, setVesselClass] = useState<VesselClass>('neoPanamax');
   const [selectedPortId, setSelectedPortId] = useState<string | null>(null);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -29,7 +63,8 @@ export default function App() {
     error: riskError,
     refresh: refreshRisk,
   } = useRiskAssessments(ports, vesselClass);
-  const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
+
+  const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications(user.email);
 
   const assessmentMap = useMemo(() => {
     const map = new Map();
@@ -77,14 +112,17 @@ export default function App() {
     }
   }, [refreshRisk, selectedPort]);
 
-  const handleRemovePort = useCallback(async (portId?: string) => {
-    const targetId = portId || selectedPortId;
-    if (!targetId) return;
-    await removePort(targetId);
-    if (selectedPortId === targetId) {
-      setSelectedPortId(null);
-    }
-  }, [removePort, selectedPortId]);
+  const handleRemovePort = useCallback(
+    async (portId?: string) => {
+      const targetId = portId || selectedPortId;
+      if (!targetId) return;
+      await removePort(targetId);
+      if (selectedPortId === targetId) {
+        setSelectedPortId(null);
+      }
+    },
+    [removePort, selectedPortId]
+  );
 
   const existingLocodes = useMemo(() => ports.map((p) => p.locode), [ports]);
 
@@ -100,12 +138,13 @@ export default function App() {
               </div>
               <div>
                 <h1 className="text-base font-bold text-slate-900">Port-Call Risk Tracker</h1>
-                <p className="text-xs text-slate-500 hidden sm:block">Monitoring & Assessment Tool</p>
+                <p className="text-xs text-slate-500 hidden sm:block">BerthMark Decision Support</p>
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
-              <div className="hidden sm:flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-slate-100 border border-slate-200">
+            <div className="flex items-center gap-2 sm:gap-3">
+              {/* Status pill */}
+              <div className="hidden lg:flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-slate-100 border border-slate-200">
                 <span
                   className={`w-2 h-2 rounded-full ${
                     portsError || riskError ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'
@@ -115,13 +154,18 @@ export default function App() {
                   {portsError || riskError ? 'FastAPI: Offline/Error' : 'FastAPI: Connected'}
                 </span>
               </div>
-              <div className="hidden md:flex items-center gap-2 text-sm">
-                <Globe className="w-4 h-4 text-slate-400" />
-                <span className="text-slate-600">{ports.length} ports tracked</span>
+
+              {/* Tracked ports count */}
+              <div className="hidden md:flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-slate-50 border border-slate-200 text-slate-600">
+                <Globe className="w-3.5 h-3.5 text-slate-400" />
+                <span>{ports.length} monitored</span>
               </div>
+
+              {/* Notifications bell */}
               <button
                 onClick={() => setShowNotifications(!showNotifications)}
                 className="relative p-2 rounded-lg hover:bg-slate-100 transition-colors"
+                title="Alerts and notifications"
               >
                 <Bell className="w-5 h-5 text-slate-600" />
                 {unreadCount > 0 && (
@@ -130,6 +174,25 @@ export default function App() {
                   </span>
                 )}
               </button>
+
+              {/* User Account / Profile Badge */}
+              <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
+                <div
+                  className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-blue-50 border border-blue-100 text-blue-900 text-xs font-medium"
+                  title={`Logged in as ${user.email} (Email notifications destination)`}
+                >
+                  <Mail className="w-3.5 h-3.5 text-blue-600" />
+                  <span className="max-w-[140px] sm:max-w-[180px] truncate">{user.email}</span>
+                </div>
+
+                <button
+                  onClick={() => logout()}
+                  className="p-1.5 rounded-lg text-slate-500 hover:text-red-600 hover:bg-red-50 transition-colors"
+                  title="Sign Out"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -143,6 +206,7 @@ export default function App() {
               notifications={notifications}
               onMarkAsRead={markAsRead}
               onMarkAllAsRead={markAllAsRead}
+              userEmail={user.email}
               loading={false}
             />
           </div>
@@ -183,13 +247,16 @@ export default function App() {
             canRemove={true}
             onRefresh={handleRefreshDetail}
             refreshing={refreshing}
+            notificationsEnabled={selectedPort.notificationsEnabled ?? true}
+            onToggleNotifications={(enabled) => toggleNotifications(selectedPort.id, enabled)}
+            userEmail={user.email}
           />
         ) : (
           <div className="space-y-6">
             {/* Dashboard Summary */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <SummaryCard
-                label="Ports Tracked"
+                label="Ports Monitored"
                 value={ports.length}
                 icon={<Globe className="w-5 h-5" />}
                 color="blue"
@@ -225,6 +292,7 @@ export default function App() {
                   onClick={handleRefresh}
                   disabled={refreshing || riskLoading}
                   className="flex items-center gap-1.5 text-sm px-3 py-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                  title="Refresh Risk Evaluation"
                 >
                   <RefreshCw className={`w-4 h-4 text-slate-500 ${refreshing ? 'animate-spin' : ''}`} />
                 </button>
@@ -235,7 +303,7 @@ export default function App() {
             <div>
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-semibold text-slate-700">
-                  Monitored Ports
+                  Monitored Ports Portfolio
                   <span className="ml-2 text-xs font-normal text-slate-400">
                     Risk evaluated for {vesselClass.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase())} class
                   </span>
@@ -246,6 +314,8 @@ export default function App() {
                 assessments={assessmentMap}
                 onSelectPort={handleSelectPort}
                 onRemovePort={(id) => handleRemovePort(id)}
+                onToggleNotifications={toggleNotifications}
+                userEmail={user.email}
                 loading={portsLoading || riskLoading}
               />
             </div>
@@ -254,8 +324,10 @@ export default function App() {
             <div className="rounded-lg bg-slate-100 border border-slate-200 p-4">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs text-slate-600">
                 <div>
-                  <div className="font-semibold text-slate-700 mb-1">Evaluation Cycle</div>
-                  Risk scores re-evaluated every 6 hours with anti-flapping cooldown logic.
+                  <div className="font-semibold text-slate-700 mb-1">Email Alert Routing</div>
+                  Automated risk alerts are dispatched to{' '}
+                  <span className="font-medium text-slate-800">{user.email}</span>. You can opt out
+                  per port at any time.
                 </div>
                 <div>
                   <div className="font-semibold text-slate-700 mb-1">Composite Scoring</div>

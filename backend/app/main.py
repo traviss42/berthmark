@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.config import get_settings
 from app.models.error import ErrorResponse
-from app.routers import notifications_router, ports_router, risk_router
+from app.routers import auth_router, notifications_router, ports_router, risk_router
 
 settings = get_settings()
 
@@ -28,6 +28,7 @@ app.add_middleware(
 )
 
 # Include endpoint routers
+app.include_router(auth_router)
 app.include_router(ports_router)
 app.include_router(risk_router)
 app.include_router(notifications_router)

@@ -51,6 +51,7 @@ export interface Port {
   isDefault: boolean;
   geofenceRadiusNm: number;
   addedByUserId: string | null;
+  notificationsEnabled?: boolean;
 }
 
 export interface CongestionMetrics {
@@ -127,6 +128,19 @@ export interface Notification {
   previousTier: RiskTier | null;
   timestamp: string;
   read: boolean;
+  recipientEmail?: string | null;
+}
+
+export interface User {
+  id: string;
+  email: string;
+  name?: string;
+}
+
+export interface AuthResponse {
+  accessToken: string;
+  tokenType: string;
+  user: User;
 }
 
 export interface RiskThresholds {

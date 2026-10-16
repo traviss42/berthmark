@@ -27,8 +27,17 @@ Built to comply with international maritime guidelines (**PIANC Report 121**) an
 
 ## Key Capabilities
 
+- **User Authentication & Private Portfolios:**
+  - Secure email-based login (e.g. `operations@pacific-shipping.com`, `captain@rotterdam-logistics.nl`, or any organization email).
+  - Multi-tenant data isolation ensures each operator maintains their own private monitored portfolio and state history.
+
+- **Automated Email Notification Routing & Per-Port Opt-Out:**
+  - The login email automatically serves as the verified destination where critical port risk state alerts are dispatched.
+  - Newly monitored ports are **opted in by default** to keep operators immediately informed of weather disruptions and berth bottlenecks.
+  - Operators can freely **opt out of notifications on a per-port basis** at any time with a single click from the monitored list or port risk detail view.
+
 - **User-Driven Port Portfolio:**
-  - Starts with a clean, unpopulated monitored list. Users curate their own portfolio by searching over 100,000+ official ports from the global UN/LOCODE database.
+  - Users curate their own portfolio by searching over 100,000+ official ports from the global UN/LOCODE database.
   - Track any port with custom geofence radii.
   - Easily remove any port from monitoring with a single click directly from the list or detail view.
 
@@ -48,6 +57,7 @@ Built to comply with international maritime guidelines (**PIANC Report 121**) an
 
 - **State Transition Alerts & Notification Feed:**
   - Real-time in-app notification center that records risk state shifts (e.g., Low → Medium, Medium → High) with anti-flapping cooldown protection.
+  - Displays destination email badges indicating exactly where alerts were dispatched.
 
 ---
 
@@ -248,8 +258,8 @@ Berthmark includes full test suites covering business logic, weakest-link scorin
 make test
 
 # Or run separately
-make test-backend    # 25 passed
-make test-frontend   # 36 passed
+make test-backend    # 32 passed
+make test-frontend   # 39 passed
 ```
 
 ---
@@ -262,16 +272,20 @@ When the backend is running (`make run-backend` or `make dev`), visit [http://lo
 
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
+| `POST` | `/api/v1/auth/login` | Authenticate with email (sets destination for email alerts). |
+| `GET` | `/api/v1/auth/me` | Fetch currently authenticated user session. |
+| `POST` | `/api/v1/auth/logout` | Revoke user authentication session. |
 | `GET` | `/api/v1/ports` | List ports monitored by the authenticated user. |
-| `POST` | `/api/v1/ports` | Add a port to the user's private monitored portfolio. |
+| `POST` | `/api/v1/ports` | Add a port to the user's private monitored portfolio (default: notifications enabled). |
 | `DELETE` | `/api/v1/ports/{portId}` | Remove a port from the user's monitored portfolio. |
+| `PATCH` | `/api/v1/ports/{portId}/notifications` | Toggle email alert notifications on/off for a specific port. |
 | `GET` | `/api/v1/ports/search?q={query}` | Search the global UN/LOCODE database by name, code, or country. |
 | `GET` | `/api/v1/ports/defaults` | Reference list of standard global maritime hubs. |
 | `GET` | `/api/v1/ports/{portId}` | Get details of a specific port. |
 | `GET` | `/api/v1/ports/{portId}/risk` | Compute real-time risk assessment for a port and vessel class (`forceRefresh=true` optional). |
 | `POST` | `/api/v1/risk/bulk-assessments` | Bulk evaluate risk assessments across multiple ports. |
 | `GET` | `/api/v1/ports/{portId}/risk/trend` | Retrieve chronological 6-hour evaluation cycles for historical trend charts. |
-| `GET` | `/api/v1/notifications` | Get state-change risk alert notifications. |
+| `GET` | `/api/v1/notifications` | Get state-change risk alert notifications (includes destination email). |
 | `PATCH`| `/api/v1/notifications/{id}/read`| Mark a specific notification as read. |
 | `POST` | `/api/v1/notifications/mark-all-read` | Mark all user notifications as read. |
 | `GET` | `/health` | System health check and status. |
@@ -286,8 +300,8 @@ berthmark/
 │   ├── app/
 │   │   ├── auth/             # Bearer authentication & user isolation dependencies
 │   │   ├── clients/          # External API clients (AISStream WS, Open-Meteo, UN/LOCODE SQLite)
-│   │   ├── models/           # Pydantic v2 schemas (Port, RiskAssessment, Notifications, VesselClass)
-│   │   ├── routers/          # FastAPI REST endpoints (/ports, /risk, /notifications)
+│   │   ├── models/           # Pydantic v2 schemas (Port, RiskAssessment, Notifications, Auth)
+│   │   ├── routers/          # FastAPI REST endpoints (/ports, /risk, /notifications, /auth)
 │   │   ├── services/         # Risk computation engine, weakest-link evaluator, port service
 │   │   ├── config.py         # Application settings via pydantic-settings
 │   │   └── main.py           # FastAPI application entrypoint and middleware
@@ -297,17 +311,22 @@ berthmark/
 │   ├── scripts/
 │   │   ├── import_unlocode.py   # CLI tool to seed and import full UNECE CSV releases
 │   │   └── test_apis.py         # Standalone external API connectivity probe
-│   ├── tests/                   # Pytest test suite (test_ports, test_risk, test_clients, etc.)
+│   ├── tests/                   # Pytest test suite (test_auth, test_ports, test_risk, etc.)
+│   │   ├── test_auth.py         # Login, logout, profile, and authorization tests
+│   │   ├── test_ports.py        # Port management, search, and notification opt-in/opt-out
+│   │   └── ...
 │   ├── .env.example             # Template for backend environment variables
 │   └── requirements.txt         # Python dependencies
 ├── frontend/
 │   ├── src/
-│   │   ├── components/       # UI components (PortList, PortSearch, PortRiskDetail, VesselSelector)
+│   │   ├── components/       # UI components (LoginScreen, PortList, PortSearch, PortRiskDetail)
+│   │   ├── context/          # React AuthContext providing login state and user session
 │   │   ├── hooks/            # Custom React hooks (usePorts, useRiskAssessments, useNotifications)
-│   │   ├── services/         # API HTTP client (ApiPortService, ApiRiskService, search caching)
-│   │   ├── types/            # TypeScript interfaces and vessel taxonomy definitions
+│   │   ├── services/         # API HTTP client (ApiPortService, ApiRiskService, ApiAuthService)
+│   │   ├── types/            # TypeScript interfaces, User models, and vessel taxonomy
 │   │   ├── utils/            # Risk color palettes, tier formatting, math helpers
 │   │   ├── App.tsx           # Dashboard layout, state orchestration, refresh handling
+
 │   │   └── main.tsx          # React application entrypoint
 │   ├── package.json          # Node dependencies and scripts
 │   ├── tsconfig.json         # TypeScript compiler configuration

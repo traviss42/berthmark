@@ -3,12 +3,12 @@ import type {
   RiskAssessment,
   Notification,
   VesselClass,
-  PortMetrics,
+  User,
+  AuthResponse,
 } from '@/types';
 
 // ── Service interfaces ──
 // All backend calls go through these interfaces.
-// The mock implementations satisfy the same contracts.
 
 export interface IPortService {
   getPorts(userId: string): Promise<Port[]>;
@@ -16,6 +16,7 @@ export interface IPortService {
   searchPorts(query: string): Promise<Port[]>;
   addPort(port: Omit<Port, 'id' | 'isDefault' | 'addedByUserId'>, userId: string): Promise<Port>;
   removePort(portId: string, userId: string): Promise<void>;
+  updatePortNotifications(portId: string, notificationsEnabled: boolean, userId?: string): Promise<Port>;
 }
 
 export interface IRiskService {
@@ -50,8 +51,15 @@ export interface INotificationService {
   ): Notification;
 }
 
+export interface IAuthService {
+  login(email: string, password?: string): Promise<AuthResponse>;
+  getCurrentUser(token?: string): Promise<User>;
+  logout(): Promise<void>;
+}
+
 export interface IServices {
   ports: IPortService;
   risk: IRiskService;
   notifications: INotificationService;
+  auth: IAuthService;
 }

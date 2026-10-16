@@ -3,6 +3,7 @@ import {
   ApiPortService,
   ApiRiskService,
   ApiNotificationService,
+  ApiAuthService,
   ApiError,
   createApiServices,
 } from '@/services/apiServices';
@@ -126,6 +127,28 @@ describe('ApiPortService', () => {
         }),
       })
     );
+  });
+
+  it('updatePortNotifications patches /api/v1/ports/{portId}/notifications', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 'port-1', notificationsEnabled: false }),
+    });
+
+    const updated = await service.updatePortNotifications('port-1', false, 'user-1');
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://test-api:8000/api/v1/ports/port-1/notifications',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ notificationsEnabled: false }),
+        headers: expect.objectContaining({
+          Authorization: 'Bearer user-1',
+        }),
+      })
+    );
+    expect(updated.notificationsEnabled).toBe(false);
   });
 
   it('throws ApiError on HTTP error status', async () => {
@@ -295,11 +318,73 @@ describe('ApiNotificationService', () => {
   });
 });
 
+describe('ApiAuthService', () => {
+  let service: ApiAuthService;
+  const mockFetch = vi.fn();
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', mockFetch);
+    service = new ApiAuthService('http://test-api:8000');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('login posts to /api/v1/auth/login with email', async () => {
+    const mockResponse = {
+      accessToken: 'token-abc',
+      tokenType: 'bearer',
+      user: {
+        id: 'captain@maritime.com',
+        email: 'captain@maritime.com',
+        name: 'captain@maritime.com',
+      },
+    };
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => mockResponse,
+    });
+
+    const res = await service.login('captain@maritime.com');
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://test-api:8000/api/v1/auth/login',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ email: 'captain@maritime.com' }),
+      })
+    );
+    expect(res.user.email).toBe('captain@maritime.com');
+    expect(res.accessToken).toBe('token-abc');
+  });
+
+  it('logout posts to /api/v1/auth/logout', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 204,
+    });
+
+    await service.logout();
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://test-api:8000/api/v1/auth/logout',
+      expect.objectContaining({
+        method: 'POST',
+      })
+    );
+  });
+});
+
 describe('createApiServices factory', () => {
   it('instantiates all required services with API implementations', () => {
     const services = createApiServices('http://localhost:8000');
     expect(services.ports).toBeInstanceOf(ApiPortService);
     expect(services.risk).toBeInstanceOf(ApiRiskService);
     expect(services.notifications).toBeInstanceOf(ApiNotificationService);
+    expect(services.auth).toBeInstanceOf(ApiAuthService);
   });
 });
+

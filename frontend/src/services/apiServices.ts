@@ -4,11 +4,14 @@ import type {
   Notification,
   VesselClass,
   RiskTier,
+  User,
+  AuthResponse,
 } from '@/types';
 import type {
   IPortService,
   IRiskService,
   INotificationService,
+  IAuthService,
   IServices,
 } from '@/services/interfaces';
 
@@ -21,8 +24,20 @@ export function getApiBaseUrl(): string {
   return DEFAULT_API_URL;
 }
 
+let currentAuthToken: string | null = null;
+
+export function setAuthToken(token: string | null): void {
+  currentAuthToken = token;
+}
+
 export function getAuthToken(userId?: string): string {
-  return userId ? `Bearer ${userId}` : 'Bearer mock-user';
+  if (userId) {
+    return `Bearer ${userId}`;
+  }
+  if (currentAuthToken) {
+    return `Bearer ${currentAuthToken}`;
+  }
+  return 'Bearer mock-user';
 }
 
 export class ApiError extends Error {
@@ -128,6 +143,22 @@ export class ApiPortService implements IPortService {
     return request<void>(
       `/api/v1/ports/${encodeURIComponent(portId)}`,
       { method: 'DELETE' },
+      this.baseUrl,
+      userId
+    );
+  }
+
+  async updatePortNotifications(
+    portId: string,
+    notificationsEnabled: boolean,
+    userId?: string
+  ): Promise<Port> {
+    return request<Port>(
+      `/api/v1/ports/${encodeURIComponent(portId)}/notifications`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ notificationsEnabled }),
+      },
       this.baseUrl,
       userId
     );
@@ -271,10 +302,46 @@ export class ApiNotificationService implements INotificationService {
   }
 }
 
+export class ApiAuthService implements IAuthService {
+  constructor(private baseUrl?: string) {}
+
+  async login(email: string, password?: string): Promise<AuthResponse> {
+    const data = await request<AuthResponse>(
+      '/api/v1/auth/login',
+      {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      },
+      this.baseUrl
+    );
+    setAuthToken(data.accessToken);
+    return data;
+  }
+
+  async getCurrentUser(token?: string): Promise<User> {
+    return request<User>(
+      '/api/v1/auth/me',
+      { method: 'GET' },
+      this.baseUrl,
+      token
+    );
+  }
+
+  async logout(): Promise<void> {
+    await request<void>(
+      '/api/v1/auth/logout',
+      { method: 'POST' },
+      this.baseUrl
+    ).catch(() => {});
+    setAuthToken(null);
+  }
+}
+
 export function createApiServices(baseUrl?: string): IServices {
   return {
     ports: new ApiPortService(baseUrl),
     risk: new ApiRiskService(baseUrl),
     notifications: new ApiNotificationService(baseUrl),
+    auth: new ApiAuthService(baseUrl),
   };
 }

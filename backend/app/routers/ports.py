@@ -3,7 +3,7 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, status
 from app.auth.dependencies import get_current_user, get_optional_current_user
-from app.models.port import CreatePortRequest, Port
+from app.models.port import CreatePortRequest, Port, UpdatePortNotificationsRequest
 from app.services.port_service import PortService, port_service
 
 router = APIRouter(prefix="/api/v1/ports", tags=["Ports"])
@@ -88,3 +88,22 @@ async def remove_monitored_port(
     service: PortService = Depends(lambda: port_service),
 ) -> None:
     await service.remove_port(port_id=portId, user_id=current_user)
+
+
+@router.patch(
+    "/{portId}/notifications",
+    response_model=Port,
+    summary="Update notification preferences for a monitored port",
+    description="Opt in or out of email notifications for this monitored port.",
+)
+async def update_port_notifications(
+    portId: str,
+    body: UpdatePortNotificationsRequest,
+    current_user: str = Depends(get_current_user),
+    service: PortService = Depends(lambda: port_service),
+) -> Port:
+    return await service.update_port_notifications(
+        port_id=portId,
+        user_id=current_user,
+        notifications_enabled=body.notificationsEnabled,
+    )

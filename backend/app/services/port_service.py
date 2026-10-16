@@ -78,10 +78,27 @@ class PortService:
             isDefault=False,
             geofenceRadiusNm=request.geofenceRadiusNm,
             addedByUserId=user_id,
+            notificationsEnabled=getattr(request, "notificationsEnabled", True),
         )
 
         self._user_ports[user_id][port_id] = new_port
         return new_port
+
+    async def update_port_notifications(
+        self, port_id: str, user_id: str, notifications_enabled: bool
+    ) -> Port:
+        """Update notification opt-in/opt-out status for a monitored port."""
+        user_dict = self._user_ports.get(user_id, {})
+        if port_id not in user_dict:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Port with ID '{port_id}' not found in user's monitored list.",
+            )
+
+        current = user_dict[port_id]
+        updated = current.model_copy(update={"notificationsEnabled": notifications_enabled})
+        user_dict[port_id] = updated
+        return updated
 
     async def remove_port(self, port_id: str, user_id: str) -> None:
         """Remove a port from the user's monitored portfolio."""

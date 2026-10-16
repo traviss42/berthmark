@@ -1,4 +1,4 @@
-import { MapPin, ChevronRight, Globe, Trash2 } from 'lucide-react';
+import { MapPin, ChevronRight, Globe, Trash2, Bell, BellOff } from 'lucide-react';
 import type { Port, RiskAssessment } from '@/types';
 import { RiskBadge } from './RiskBadge';
 
@@ -7,10 +7,20 @@ interface Props {
   assessments: Map<string, RiskAssessment>;
   onSelectPort: (portId: string) => void;
   onRemovePort?: (portId: string) => void;
+  onToggleNotifications?: (portId: string, enabled: boolean) => void;
+  userEmail?: string;
   loading: boolean;
 }
 
-export function PortList({ ports, assessments, onSelectPort, onRemovePort, loading }: Props) {
+export function PortList({
+  ports,
+  assessments,
+  onSelectPort,
+  onRemovePort,
+  onToggleNotifications,
+  userEmail,
+  loading,
+}: Props) {
   if (loading) {
     return (
       <div className="space-y-3">
@@ -48,6 +58,7 @@ export function PortList({ ports, assessments, onSelectPort, onRemovePort, loadi
     <div className="space-y-2.5">
       {ports.map((port) => {
         const assessment = assessments.get(port.id);
+        const isNotifEnabled = port.notificationsEnabled !== false;
         return (
           <div
             key={port.id}
@@ -71,8 +82,17 @@ export function PortList({ ports, assessments, onSelectPort, onRemovePort, loadi
                 </div>
                 <div className="min-w-0">
                   <div className="text-sm font-semibold text-slate-900 truncate">{port.name}</div>
-                  <div className="text-xs text-slate-500 mt-0.5">
-                    {port.locode} · {port.country} · {port.geofenceRadiusNm}nm geofence
+                  <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-2 flex-wrap">
+                    <span>{port.locode} · {port.country} · {port.geofenceRadiusNm}nm</span>
+                    {isNotifEnabled ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
+                        <Bell className="w-2.5 h-2.5" /> Email alerts ON
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                        <BellOff className="w-2.5 h-2.5" /> Email alerts OFF
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -81,6 +101,27 @@ export function PortList({ ports, assessments, onSelectPort, onRemovePort, loadi
                   <RiskBadge tier={assessment.compositeTier} size="sm" />
                 ) : (
                   <span className="text-xs text-slate-400">Loading risk...</span>
+                )}
+                {onToggleNotifications && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggleNotifications(port.id, !isNotifEnabled);
+                    }}
+                    title={
+                      isNotifEnabled
+                        ? `Email notifications ON (sent to ${userEmail || 'your email'}). Click to opt out.`
+                        : 'Email notifications OFF. Click to opt in.'
+                    }
+                    className={`p-1.5 rounded-lg transition-colors ${
+                      isNotifEnabled
+                        ? 'text-blue-600 hover:text-blue-700 hover:bg-blue-50'
+                        : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    {isNotifEnabled ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
+                  </button>
                 )}
                 {onRemovePort && (
                   <button

@@ -91,6 +91,47 @@ def test_cannot_delete_non_monitored_port(client: TestClient, auth_headers: dict
     assert resp.status_code == 404
 
 
+def test_port_notification_opt_in_default_and_opt_out(client: TestClient, auth_headers: dict):
+    """Verify that custom ports are opted into notifications by default and can be opted out."""
+    payload = {
+        "name": "Notify Port",
+        "locode": "XXNOT",
+        "country": "Alertland",
+        "lat": 15.0,
+        "lon": 25.0,
+    }
+    create_resp = client.post("/api/v1/ports", json=payload, headers=auth_headers)
+    assert create_resp.status_code == 201
+    port = create_resp.json()
+    assert port["notificationsEnabled"] is True  # Default opt-in
+    port_id = port["id"]
+
+    # Opt out of notifications for this port
+    opt_out_resp = client.patch(
+        f"/api/v1/ports/{port_id}/notifications",
+        json={"notificationsEnabled": False},
+        headers=auth_headers,
+    )
+    assert opt_out_resp.status_code == 200
+    assert opt_out_resp.json()["notificationsEnabled"] is False
+
+    # Check that GET /api/v1/ports reflects this preference
+    list_resp = client.get("/api/v1/ports", headers=auth_headers)
+    assert list_resp.status_code == 200
+    found = next(p for p in list_resp.json() if p["id"] == port_id)
+    assert found["notificationsEnabled"] is False
+
+    # Toggle back to opt-in
+    opt_in_resp = client.patch(
+        f"/api/v1/ports/{port_id}/notifications",
+        json={"notificationsEnabled": True},
+        headers=auth_headers,
+    )
+    assert opt_in_resp.status_code == 200
+    assert opt_in_resp.json()["notificationsEnabled"] is True
+
+
+
 def test_port_privacy_multi_tenant(
     client: TestClient, auth_headers: dict, user2_auth_headers: dict
 ):

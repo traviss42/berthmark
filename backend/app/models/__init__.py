@@ -2,8 +2,9 @@
 
 from app.models.common import RiskTier, SubRiskCategory, VesselClass, VesselSector
 from app.models.error import ErrorResponse
+from app.models.auth import LoginRequest, LoginResponse, UserResponse
 from app.models.notification import CreateAlertRequest, Notification, NotificationType
-from app.models.port import CreatePortRequest, Port
+from app.models.port import CreatePortRequest, Port, UpdatePortNotificationsRequest
 from app.models.risk import (
     BulkRiskAssessmentRequest,
     CongestionMetrics,
@@ -23,6 +24,7 @@ __all__ = [
     "VesselClass",
     "Port",
     "CreatePortRequest",
+    "UpdatePortNotificationsRequest",
     "CongestionMetrics",
     "TerminalMetrics",
     "WeatherMetrics",
@@ -36,4 +38,7 @@ __all__ = [
     "Notification",
     "CreateAlertRequest",
     "ErrorResponse",
+    "LoginRequest",
+    "LoginResponse",
+    "UserResponse",
 ]

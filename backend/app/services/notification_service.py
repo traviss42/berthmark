@@ -72,6 +72,21 @@ class NotificationService:
             else f"{alert_req.portName} initial risk assessment: {new_label}."
         )
 
+        # Check if user has opted out of notifications for this port
+        port_notifications_enabled = True
+        try:
+            from app.services.port_service import port_service
+            user_ports = port_service._user_ports.get(user_id, {})
+            monitored_port = user_ports.get(alert_req.portId)
+            if monitored_port and not monitored_port.notificationsEnabled:
+                port_notifications_enabled = False
+        except Exception:
+            pass
+
+        recipient_email = None
+        if port_notifications_enabled:
+            recipient_email = user_id if "@" in user_id else f"{user_id}@berthmark.com"
+
         notification = Notification(
             id=notif_id,
             type="stateChange",
@@ -83,6 +98,7 @@ class NotificationService:
             previousTier=alert_req.previousTier,
             timestamp=now_str,
             read=False,
+            recipientEmail=recipient_email,
         )
 
         if user_id not in self._user_notifications:

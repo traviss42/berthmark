@@ -23,6 +23,11 @@ class Port(BaseModel):
         description="User ID for private custom ports; null for default ports",
         examples=[None],
     )
+    notificationsEnabled: bool = Field(
+        default=True,
+        description="Whether email notifications and risk alerts are enabled for this port",
+        examples=[True],
+    )
 
 
 class CreatePortRequest(BaseModel):
@@ -42,4 +47,17 @@ class CreatePortRequest(BaseModel):
         le=50.0,
         description="Configured geofence radius in nautical miles",
         examples=[8.0],
+    )
+    notificationsEnabled: bool = Field(
+        default=True,
+        description="Opt into state transition email alerts for this port by default",
+        examples=[True],
+    )
+
+
+class UpdatePortNotificationsRequest(BaseModel):
+    notificationsEnabled: bool = Field(
+        ...,
+        description="Enable or disable email alerts for this port",
+        examples=[True],
     )

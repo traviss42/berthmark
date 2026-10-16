@@ -18,6 +18,11 @@ class Notification(BaseModel):
     previousTier: Optional[RiskTier] = Field(default=None, examples=["medium"])
     timestamp: str = Field(..., examples=["2026-10-16T00:00:00Z"])
     read: bool = Field(default=False)
+    recipientEmail: Optional[str] = Field(
+        default=None,
+        description="Login email address where notification alert was dispatched",
+        examples=["operations@maritime.com"],
+    )
 
 
 class CreateAlertRequest(BaseModel):
