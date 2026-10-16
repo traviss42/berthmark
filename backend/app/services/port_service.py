@@ -55,14 +55,18 @@ class PortService:
         if port_id in self._default_ports:
             return self._default_ports[port_id]
 
-        # Search directory database directly
+        # Search directory database directly by ID or UN/LOCODE
         db_port = self.directory_client.get_port_by_id(port_id)
         if db_port:
             return db_port
 
+        locode_port = self.directory_client.get_port_by_locode(port_id)
+        if locode_port:
+            return locode_port
+
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Port with ID '{port_id}' not found.",
+            detail=f"Port with ID or UN/LOCODE '{port_id}' not found.",
         )
 
     async def add_port(self, request: CreatePortRequest, user_id: str) -> Port:

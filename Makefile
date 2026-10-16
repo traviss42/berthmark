@@ -1,4 +1,4 @@
-.PHONY: help install install-backend install-frontend test test-backend test-frontend test-apis run-backend run-frontend dev build seed-db clean
+.PHONY: help install install-backend install-frontend test test-backend test-frontend test-apis run-backend run-frontend dev build import-unlocode seed-db clean
 
 SHELL := /bin/bash
 PYTHON := backend/.venv/bin/python
@@ -22,8 +22,8 @@ install-backend: ## Set up Python virtual environment and install backend depend
 	@if [ ! -d "backend/.venv" ]; then python3 -m venv backend/.venv; fi
 	@backend/.venv/bin/pip install --upgrade pip
 	@backend/.venv/bin/pip install -r backend/requirements.txt
-	@echo "==> Initializing UN/LOCODE database..."
-	@$(MAKE) seed-db
+	@echo "==> Importing UN/LOCODE maritime database..."
+	@$(MAKE) import-unlocode
 
 install-frontend: ## Install frontend node modules
 	@echo "==> Installing frontend dependencies..."
@@ -64,9 +64,12 @@ dev: ## Run both backend and frontend servers concurrently (Ctrl+C stops both)
 		trap "kill $$BACKEND_PID $$FRONTEND_PID 2>/dev/null || true; exit 0" INT TERM; \
 		wait $$BACKEND_PID $$FRONTEND_PID'
 
-seed-db: ## Seed UN/LOCODE SQLite database from maritime_ports.json
-	@echo "==> Seeding UN/LOCODE maritime database..."
-	@PYTHONPATH=backend $(PYTHON) backend/scripts/import_unlocode.py --seed
+import-unlocode: ## Import UN/LOCODE maritime ports (Function=1 with valid coordinates) into SQLite
+	@echo "==> Importing UN/LOCODE maritime ports database..."
+	@PYTHONPATH=backend $(PYTHON) backend/scripts/import_unlocode.py
+
+seed-db: import-unlocode ## Alias for import-unlocode
+
 
 build: ## Build frontend production assets
 	@echo "==> Building frontend production bundle..."

@@ -207,18 +207,30 @@ class UnlocodeDatabase:
                     CASE
                         WHEN locode = ? THEN 1
                         WHEN locode LIKE ? THEN 2
-                        WHEN name LIKE ? THEN 3
-                        ELSE 4
+                        WHEN name LIKE ? OR name LIKE ? THEN 3
+                        WHEN name LIKE ? THEN 4
+                        ELSE 5
                     END AS rank
                 FROM unlocode_ports
                 WHERE locode LIKE ? OR name LIKE ? OR country LIKE ?
-                ORDER BY rank ASC, name ASC
+                ORDER BY rank ASC, is_default DESC, name ASC
                 LIMIT ?;
                 """,
-                (upper_q, f"{upper_q}%", f"{q}%", pattern, pattern, pattern, limit),
+                (
+                    upper_q,
+                    f"{upper_q}%",
+                    f"{q}%",
+                    f"Port of {q}%",
+                    pattern,
+                    pattern,
+                    pattern,
+                    pattern,
+                    limit,
+                ),
             )
             rows = cursor.fetchall()
             return [self._row_to_port(r) for r in rows]
+
 
     def _row_to_port(self, row: sqlite3.Row) -> Port:
         return Port(

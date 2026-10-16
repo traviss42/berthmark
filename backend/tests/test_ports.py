@@ -156,3 +156,46 @@ def test_port_privacy_multi_tenant(
     # User 2 cannot delete User 1's port
     del_resp = client.delete(f"/api/v1/ports/{port_id}", headers=user2_auth_headers)
     assert del_resp.status_code == 404
+
+
+def test_search_japan_and_canadian_ports(client: TestClient, auth_headers: dict):
+    """Verify UN/LOCODE Function=1 maritime ports with valid coordinates are accessible, while coordinate-less rows are excluded."""
+    # 1. Search Japan by country (returns first 50 of 113 Japanese ports with coordinates)
+    resp_jp = client.get("/api/v1/ports/search?q=Japan")
+    assert resp_jp.status_code == 200
+    jp_ports = resp_jp.json()
+    assert len(jp_ports) >= 5
+    assert all(p["country"] == "Japan" for p in jp_ports)
+
+    # 2. Search Japanese ports with coordinates by LOCODE / name
+    for locode, expected_name in [("JPTYO", "Tokyo"), ("JPYOK", "Yokohama"), ("JPOSA", "Osaka"), ("JPUKB", "Kobe")]:
+        resp = client.get(f"/api/v1/ports/search?q={locode}")
+        assert resp.status_code == 200
+        assert any(p["locode"] == locode and expected_name in p["name"] for p in resp.json())
+
+
+    # 3. Search Canada by country (returns first 50 of 327 Canadian ports with coordinates in UN/LOCODE)
+    resp_ca = client.get("/api/v1/ports/search?q=Canada")
+    assert resp_ca.status_code == 200
+    ca_ports = resp_ca.json()
+    assert len(ca_ports) >= 5
+    assert all(p["country"] == "Canada" for p in ca_ports)
+
+    # 4. Search Canadian port that has coordinates in UN/LOCODE (e.g., Victoria CAVIC)
+    resp_vic = client.get("/api/v1/ports/search?q=CAVIC")
+    assert resp_vic.status_code == 200
+    assert any(p["locode"] == "CAVIC" and "Victoria" in p["name"] for p in resp_vic.json())
+
+    # 5. Ports lacking coordinates in the official UN/LOCODE dataset (e.g. CAMTR) are not imported
+    resp_montreal = client.get("/api/v1/ports/search?q=CAMTR")
+    assert resp_montreal.status_code == 200
+    assert not any(p["locode"] == "CAMTR" for p in resp_montreal.json())
+
+    # 6. Access risk evaluation directly by UN/LOCODE
+    risk_resp = client.get("/api/v1/ports/JPTYO/risk?vesselClass=panamax")
+    assert risk_resp.status_code == 200
+    risk_data = risk_resp.json()
+    assert risk_data["portId"] == "JPTYO"
+    assert "weather" in risk_data["subRisks"]
+    assert "congestion" in risk_data["subRisks"]
+

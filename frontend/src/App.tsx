@@ -18,6 +18,7 @@ import { PortSearch } from '@/components/PortSearch';
 import { PortRiskDetail } from '@/components/PortRiskDetail';
 import { VesselClassSelector } from '@/components/VesselClassSelector';
 import { NotificationPanel } from '@/components/NotificationPanel';
+import { isDemoAccount } from '@/utils/demoAccount';
 
 export default function App() {
   const { user, loading: authLoading } = useAuth();
@@ -193,11 +194,24 @@ function Dashboard({ user }: { user: User }) {
               {/* User Account / Profile Badge */}
               <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
                 <div
-                  className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-blue-50 border border-blue-100 text-blue-900 text-xs font-medium"
-                  title={`Logged in as ${user.email} (Email notifications destination)`}
+                  className={`flex items-center gap-2 px-2.5 py-1 rounded-lg border text-xs font-medium ${
+                    isDemoAccount(user.email)
+                      ? 'bg-amber-50 border-amber-200 text-amber-900'
+                      : 'bg-blue-50 border-blue-100 text-blue-900'
+                  }`}
+                  title={
+                    isDemoAccount(user.email)
+                      ? `Logged in as ${user.email} (Demo account: Real email delivery turned off)`
+                      : `Logged in as ${user.email} (Email notifications destination)`
+                  }
                 >
-                  <Mail className="w-3.5 h-3.5 text-blue-600" />
+                  <Mail className={`w-3.5 h-3.5 ${isDemoAccount(user.email) ? 'text-amber-600' : 'text-blue-600'}`} />
                   <span className="max-w-[140px] sm:max-w-[180px] truncate">{user.email}</span>
+                  {isDemoAccount(user.email) && (
+                    <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-200/80 text-amber-900 uppercase tracking-wider">
+                      Demo
+                    </span>
+                  )}
                 </div>
 
                 <button
@@ -230,6 +244,28 @@ function Dashboard({ user }: { user: User }) {
 
       {/* Main content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {/* Demo Account In-App Notice Banner */}
+        {isDemoAccount(user.email) && (
+          <div className="mb-6 rounded-xl bg-amber-50 border border-amber-200 p-4 flex items-start gap-3.5 shadow-sm">
+            <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center flex-shrink-0 text-amber-700 mt-0.5">
+              <Mail className="w-4 h-4" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h4 className="text-sm font-semibold text-amber-950">
+                  Demo Account Active: Outbound Email Notifications Turned Off
+                </h4>
+                <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-200/70 text-amber-800">
+                  Bounce Protection Active
+                </span>
+              </div>
+              <p className="text-xs text-amber-800/90 mt-1 leading-relaxed">
+                You are currently logged in with a demo profile (<span className="font-mono font-medium text-amber-950">{user.email}</span>). Real outbound SMTP email delivery is disabled for demo accounts to prevent bounced emails. In-app alerts, port-call risk profiling, and live telemetry remain fully active. To receive actual email dispatches, configure SMTP and log in with a live recipient address.
+              </p>
+            </div>
+          </div>
+        )}
+
         {(portsError || riskError) && (
           <div className="mb-6 rounded-lg bg-red-50 border border-red-200 p-4 flex items-start justify-between">
             <div className="flex items-start gap-3">

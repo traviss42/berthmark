@@ -9,6 +9,27 @@ from app.config import get_settings
 
 logger = logging.getLogger("berthmark.email")
 
+DEMO_DOMAINS = (
+    "pacific-shipping.com",
+    "rotterdam-logistics.nl",
+    "globalmaritime.org",
+    "example.com",
+    "test.com",
+    "maritime.com",
+)
+
+
+def is_demo_account(email: str) -> bool:
+    """Check if recipient email belongs to a demo or simulated account."""
+    if not email:
+        return False
+    clean = email.strip().lower()
+    if any(clean.endswith(f"@{domain}") for domain in DEMO_DOMAINS):
+        return True
+    if clean.startswith("demo@") or clean.startswith("test@") or clean == "mock-user":
+        return True
+    return False
+
 
 class EmailService:
     """Dispatches operational alerts and subscription emails."""
@@ -25,19 +46,24 @@ class EmailService:
     ) -> bool:
         """Send an email to the recipient.
 
-        If SMTP server is configured in settings/env, dispatches via SMTP.
+        If recipient is a demo account, real SMTP delivery is suppressed to prevent bounces.
+        If SMTP server is configured in settings/env and recipient is non-demo, dispatches via SMTP.
         Always logs a formatted email preview to stdout/logger for local development and testing.
         """
+        is_demo = is_demo_account(to_email)
         record = {
             "to": to_email,
             "subject": subject,
             "body": plain_text,
+            "is_demo": is_demo,
+            "smtp_dispatched": False,
         }
         self._sent_emails.append(record)
 
-        # Always output formatted email preview box to console/logs
+        # Output formatted email preview box to console/logs
+        tag = " [DEMO ACCOUNT - REAL SMTP SUPPRESSED]" if is_demo else ""
         preview = (
-            f"\n==================== [OUTBOUND EMAIL DISPATCH] ====================\n"
+            f"\n==================== [OUTBOUND EMAIL DISPATCH{tag}] ====================\n"
             f"To: {to_email}\n"
             f"From: alerts@berthmark.com\n"
             f"Subject: {subject}\n"
@@ -47,6 +73,14 @@ class EmailService:
         )
         print(preview, flush=True)
         logger.info(preview)
+
+        # Do not send real emails for demo accounts to prevent bounces
+        if is_demo:
+            logger.info(
+                "Demo account detected for '%s'. Real SMTP delivery suppressed to prevent bounces.",
+                to_email,
+            )
+            return True
 
         settings = get_settings()
         smtp_host = getattr(settings, "SMTP_HOST", None)
@@ -69,6 +103,7 @@ class EmailService:
                     if smtp_user and smtp_pass:
                         server.login(smtp_user, smtp_pass)
                     server.send_message(msg)
+                record["smtp_dispatched"] = True
                 return True
             except Exception as e:
                 logger.warning(f"Failed to dispatch email via SMTP ({smtp_host}:{smtp_port}): {e}")

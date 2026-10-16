@@ -1,5 +1,6 @@
 """Unit and integration tests for notification endpoints."""
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -179,5 +180,71 @@ def test_immediate_subscription_baseline_email_sent(client: TestClient):
     assert len(matching_emails) >= 1
     assert "[Berthmark Alert] Subscribed to Port of Rotterdam" in matching_emails[0]["subject"]
     assert "CURRENT LIVE BASELINE CONDITIONS" in matching_emails[0]["body"]
+    # Verify flagged as demo account and real SMTP was suppressed
+    assert matching_emails[0]["is_demo"] is True
+    assert matching_emails[0]["smtp_dispatched"] is False
+
+
+@pytest.mark.asyncio
+async def test_demo_account_suppresses_smtp_delivery_and_prevents_bounces(monkeypatch):
+    """Verify email_service skips SMTP delivery for demo accounts and dispatches for real accounts."""
+    import smtplib
+    from app.services.email_service import email_service, is_demo_account
+
+    smtp_attempts = []
+
+    class MockSMTP:
+        def __init__(self, host, port, timeout=10):
+            smtp_attempts.append((host, port))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+        def starttls(self):
+            pass
+
+        def login(self, user, pwd):
+            pass
+
+        def send_message(self, msg):
+            pass
+
+    monkeypatch.setattr(smtplib, "SMTP", MockSMTP)
+
+    # 1. Test helper function
+    assert is_demo_account("operations@pacific-shipping.com") is True
+    assert is_demo_account("captain@rotterdam-logistics.nl") is True
+    assert is_demo_account("risk-desk@globalmaritime.org") is True
+    assert is_demo_account("test@example.com") is True
+    assert is_demo_account("analyst@maritime.com") is True
+    assert is_demo_account("harbormaster@portauthority.gov") is False
+
+    # 2. Configure mock SMTP host
+    from app.config import get_settings
+    settings = get_settings()
+    monkeypatch.setattr(settings, "SMTP_HOST", "smtp.mock-mail.com")
+
+    # 3. Send email to demo account: SMTP should NOT be called
+    res_demo = await email_service.send_email(
+        to_email="operations@pacific-shipping.com",
+        subject="Test Demo",
+        plain_text="Demo Alert",
+    )
+    assert res_demo is True
+    assert len(smtp_attempts) == 0  # No SMTP connection made!
+
+    # 4. Send email to real operator account: SMTP SHOULD be called
+    res_real = await email_service.send_email(
+        to_email="harbormaster@portauthority.gov",
+        subject="Real Operational Alert",
+        plain_text="Critical Weather Alert",
+    )
+    assert res_real is True
+    assert len(smtp_attempts) == 1  # SMTP connected!
+    assert smtp_attempts[0] == ("smtp.mock-mail.com", 587)
+
 
 

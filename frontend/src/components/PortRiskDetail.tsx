@@ -3,6 +3,7 @@ import type { RiskAssessment } from '@/types';
 import { RiskBadge } from './RiskBadge';
 import { SubRiskBreakdown } from './SubRiskBreakdown';
 import { TIER_COLORS, formatTimestamp } from '@/utils/riskDisplay';
+import { isDemoAccount } from '@/utils/demoAccount';
 
 interface Props {
   assessment: RiskAssessment;
@@ -96,7 +97,9 @@ export function PortRiskDetail({
             <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1">
               <Mail className="w-3 h-3 text-slate-400" />
               {notificationsEnabled
-                ? `Alerts dispatched to: ${userEmail || 'login email'}`
+                ? isDemoAccount(userEmail)
+                  ? `In-app alerts active (Demo account: outbound emails turned off)`
+                  : `Alerts dispatched to: ${userEmail || 'login email'}`
                 : 'Email alerts are disabled for this port.'}
             </p>
           </div>

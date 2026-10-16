@@ -15,12 +15,13 @@ Built to comply with international maritime guidelines (**PIANC Report 121**) an
 - [Real Data Sources & Multi-Tier Caching](#real-data-sources--multi-tier-caching)
 - [Prerequisites](#prerequisites)
 - [Quickstart: Installation & Running](#quickstart-installation--running)
+- [SMTP Setup & Email Notification Delivery](#smtp-setup--email-notification-delivery)
 - [Makefile Command Reference](#makefile-command-reference)
 - [External APIs & Diagnostic Probe](#external-apis--diagnostic-probe)
 - [Automated Testing](#automated-testing)
 - [API Reference & Swagger Documentation](#api-reference--swagger-documentation)
 - [Project Layout](#project-layout)
-- [UN/LOCODE Data Management](#unlocode-data-management)
+- [UN/LOCODE Data Management & Port Coverage](#unlocode-data-management--port-coverage)
 - [License](#license)
 
 ---
@@ -35,9 +36,10 @@ Built to comply with international maritime guidelines (**PIANC Report 121**) an
   - The login email automatically serves as the verified destination where critical port risk state alerts are dispatched.
   - Newly monitored ports are **opted in by default** to keep operators immediately informed of weather disruptions and berth bottlenecks.
   - Operators can freely **opt out of notifications on a per-port basis** at any time with a single click from the monitored list or port risk detail view.
+  - **Demo Account Protection:** When logged in with a demo account (e.g., `@pacific-shipping.com`, `@rotterdam-logistics.nl`, `@globalmaritime.org`, `@example.com`), real outbound SMTP emails are automatically suppressed to prevent bounces, and an in-app notice is displayed in the UI.
 
 - **User-Driven Port Portfolio:**
-  - Users curate their own portfolio by searching over 100,000+ official ports from the global UN/LOCODE database.
+  - Users curate their own portfolio by searching the **11,825** global maritime ports in the UN/LOCODE database that have Function Code `1` (*Maritime transport*) and valid geographical coordinates.
   - Track any port with custom geofence radii.
   - Easily remove any port from monitoring with a single click directly from the list or detail view.
 
@@ -99,7 +101,7 @@ Built to comply with international maritime guidelines (**PIANC Report 121**) an
 Berthmark does not rely on mock databases; it connects directly to live maritime services:
 
 1. **UN/LOCODE Maritime Database (SQLite):**
-   - High-performance local SQLite database (`backend/data/unlocode.db`) seeded with UN/ECE standard location codes and parsed coordinates.
+   - High-performance local SQLite database (`backend/data/unlocode.db`) populated from the official UN/LOCODE dataset, filtered strictly for maritime ports (`Function = 1`) that have valid geographical coordinates.
 2. **Open-Meteo Marine & Atmospheric Weather API:**
    - Real-time wave height, wind speed, gust velocity, and swell period fetched directly from Open-Meteo endpoints.
 3. **AISStream Live Vessel Traffic (WebSocket API):**
@@ -111,8 +113,8 @@ To minimize network latency, avoid redundant round-trips, and respect third-part
 
 | Layer | Component | TTL | Strategy | Force Refresh |
 | :--- | :--- | :--- | :--- | :--- |
-| **Backend** | Marine Weather Client | 15 Minutes | In-memory key by `lat:lon` | Supported |
-| **Backend** | AISStream Traffic Client | 5 Minutes | In-memory key by `port_id:vessel_class` | Supported |
+| **Backend** | Marine Weather Client | 30 Minutes | SQLite (`external_weather_cache`) + In-memory | Supported |
+| **Backend** | AISStream Traffic Client | 30 Minutes | SQLite (`external_ais_traffic_cache`) + In-memory | Supported |
 | **Backend** | Risk Assessment Service | 5 Minutes | In-memory key by `port_id:vessel_class` | `forceRefresh=true` query param |
 | **Backend** | Historical Trend Engine | 5 Minutes | In-memory key by `port_id:vessel_class:days` | `forceRefresh=true` query param |
 | **Frontend** | Port Directory Search | 5 Minutes | Client-side memory cache by normalized query | Automatic cache invalidation |
@@ -149,7 +151,7 @@ Copy the example configuration to `backend/.env`:
 cp backend/.env.example backend/.env
 ```
 
-Edit `backend/.env` to configure your settings.
+Edit `backend/.env` to configure your database, external API keys, and optional SMTP settings:
 
 ```env
 # Database Configuration (Database-Agnostic SQLAlchemy URL)
@@ -160,13 +162,20 @@ DATABASE_URL=sqlite:///backend/data/berthmark.db
 
 # Live AISStream vessel tracking (Optional: free API key from aisstream.io)
 AISSTREAM_API_KEY=your_aisstream_api_key_here
+
+# Outbound Email & Alert Delivery (Optional: defaults to terminal console preview if SMTP_HOST is empty)
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USER=
+SMTP_PASSWORD=
+SMTP_FROM=alerts@berthmark.com
 ```
 
 *(If `AISSTREAM_API_KEY` is left blank, the application will automatically fall back to deterministic vessel traffic models without crashing).*
 
 ### 3. One-Command Setup
 
-Install all backend virtual environment dependencies, initialize the UN/LOCODE SQLite database, and install frontend packages with:
+Install all backend virtual environment dependencies, import the UN/LOCODE SQLite database, and install frontend packages with:
 
 ```bash
 make install
@@ -188,13 +197,65 @@ Once started:
 
 ---
 
+## SMTP Setup & Email Notification Delivery
+
+Berthmark dispatches multipart HTML + plain-text email alerts whenever a monitored port's risk tier transitions (or when a port is initially subscribed with notifications enabled).
+
+### Configuration Variables (`backend/.env`)
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `SMTP_HOST` | *(empty)* | Hostname of your SMTP relay server (e.g., `smtp.gmail.com`, `smtp.sendgrid.net`, `localhost`). Leave empty for local console preview mode. |
+| `SMTP_PORT` | `587` | SMTP port (`587` for STARTTLS, `465` for implicit SSL/TLS, `1025` for local MailHog/Mailpit). |
+| `SMTP_USER` | *(empty)* | SMTP authentication username (optional if using unauthenticated local relay). |
+| `SMTP_PASSWORD` | *(empty)* | SMTP authentication password or API key / App Password. |
+| `SMTP_FROM` | `alerts@berthmark.com` | Sender `From` address used on outbound risk alert emails. |
+
+### Provider Examples
+
+- **Gmail (using an App Password):**
+  ```env
+  SMTP_HOST=smtp.gmail.com
+  SMTP_PORT=587
+  SMTP_USER=your.address@gmail.com
+  SMTP_PASSWORD=your_16_char_app_password
+  SMTP_FROM=your.address@gmail.com
+  ```
+- **SendGrid / Postmark / Mailgun:**
+  ```env
+  SMTP_HOST=smtp.sendgrid.net
+  SMTP_PORT=587
+  SMTP_USER=apikey
+  SMTP_PASSWORD=SG.your_sendgrid_api_key
+  SMTP_FROM=alerts@yourdomain.com
+  ```
+- **Local Development with MailHog (No Real Emails Sent Externally):**
+  ```bash
+  docker run -d -p 1025:1025 -p 8025:8025 mailhog/mailhog
+  ```
+  ```env
+  SMTP_HOST=localhost
+  SMTP_PORT=1025
+  SMTP_USER=
+  SMTP_PASSWORD=
+  SMTP_FROM=alerts@berthmark.local
+  ```
+  View captured emails at `http://localhost:8025`.
+
+### Console Preview Fallback & Demo Account Suppression
+
+1. **Console Preview Mode:** When `SMTP_HOST` is unset or empty, Berthmark logs a formatted preview of each alert email to the backend terminal without failing.
+2. **Demo Account Bounce Prevention:** When a user logs in with any demo account (such as `operations@pacific-shipping.com`, `captain@rotterdam-logistics.nl`, `chartering@globalmaritime.org`, or `@example.com` / `@test.com` domains), **real outbound SMTP emails are never sent** even if `SMTP_HOST` is configured. This prevents bounced emails to non-existent demo domains. In-app notifications remain fully active, and an in-app banner informs the user that outbound email delivery is disabled for demo accounts.
+
+---
+
 ## Makefile Command Reference
 
 A comprehensive `Makefile` is provided to streamline development, testing, and lifecycle management:
 
 | Command | Description |
 | :--- | :--- |
-| `make install` | Full installation: sets up Python `.venv`, installs pip packages, seeds SQLite DB, and runs `npm install`. |
+| `make install` | Full installation: sets up Python `.venv`, installs pip packages, imports UN/LOCODE SQLite DB, and runs `npm install`. |
 | `make dev` | Launches both backend (:8000) and frontend (:5173) concurrently with unified logging and graceful shutdown. |
 | `make run-backend` | Starts only the FastAPI backend server on [http://localhost:8000](http://localhost:8000). |
 | `make run-frontend` | Starts only the Vite React frontend server on [http://localhost:5173](http://localhost:5173). |
@@ -203,8 +264,9 @@ A comprehensive `Makefile` is provided to streamline development, testing, and l
 | `make test-frontend` | Runs the frontend test suite with vitest. |
 | `make test-apis` | Runs the live external API diagnostic probe (Open-Meteo, AISStream, UN/LOCODE SQLite). |
 | `make build` | Builds the production-ready frontend bundle into `frontend/dist`. |
-| `make seed-db` | Seeds or re-indexes `backend/data/unlocode.db` from `backend/data/maritime_ports.json`. |
+| `make import-unlocode` | Downloads and imports all UN/LOCODE maritime ports (`Function = 1` with valid coordinates) into `backend/data/unlocode.db`. |
 | `make clean` | Removes `__pycache__`, `.pytest_cache`, and frontend build artifacts. |
+
 
 ---
 
@@ -349,23 +411,34 @@ berthmark/
 
 ---
 
-## UN/LOCODE Data Management
+## UN/LOCODE Data Management & Port Coverage
 
-UN/ECE distributes the UN/LOCODE database biannually as flat files. Berthmark includes an embedded SQLite database engine with an automated CLI importer:
+UN/ECE distributes the UN/LOCODE dataset (`code-list.csv`, `country-codes.csv`, and `function-classifiers.csv`). Berthmark populates `backend/data/unlocode.db` directly from the official UN/LOCODE dataset using two strict criteria:
 
-- **Automatic Seeding:** Running `make install` automatically creates and indexes `backend/data/unlocode.db` from `backend/data/maritime_ports.json`.
-- **Importing Official UNECE Releases:** If you obtain the full UNECE CSV releases (~110,000 global locations), you can import them directly:
-  ```bash
-  # Import a single UNECE CSV file:
-  python backend/scripts/import_unlocode.py --csv path/to/2024-1_CodeList.csv
+1. **Function Code `1` (*Maritime transport — sea port or maritime port*):** Only locations whose `Function` classifier (`row[7]`) includes code `1` per [`function-classifiers.csv`](https://raw.githubusercontent.com/datasets/un-locode/refs/heads/main/data/function-classifiers.csv) are considered maritime ports (**17,607** global entries out of ~116,000 total UN/LOCODE locations).
+2. **Valid Geographical Coordinates Present:** The entry must contain valid UNECE degree-minute coordinates (`DDMM[N/S] DDDMM[E/W]`) in the `Coordinates` column (`row[10]`). Because `aisstream.io` WebSocket subscriptions and Open-Meteo marine weather queries require a latitude/longitude bounding box around the port, entries lacking coordinates in UN/LOCODE are skipped without guessing or fabricating fallback coordinates (**11,825** unique maritime ports with valid coordinates are imported).
 
-  # Import directory of UNECE part files:
-  python backend/scripts/import_unlocode.py --dir path/to/csv_parts/
-  ```
-  The importer filters for maritime/waterborne facilities (`Function` code 1) and converts coordinate notations (`DDMM[N/S] DDDMM[E/W]`) to decimal degrees.
+### Why Some Ports (Including Many in Japan and Canada) Were Missing
+
+1. **Previous Static Seed Limitation:** Earlier versions initialized `unlocode.db` from a small 44-port static file (`backend/data/maritime_ports.json`) via `make seed-db`, which included zero Japanese ports and only a single Canadian port. Running `make import-unlocode` (or `make install`) now imports directly from the full UN/LOCODE dataset.
+2. **Missing Coordinates in Official UN/LOCODE Releases:** In the official UN/LOCODE `code-list.csv` dataset, **5,716 out of 17,607** maritime (`Function = 1`) port entries have an empty `Coordinates` column:
+   - **Japan (`JP`):** Out of 1,562 maritime port rows, **113** have coordinates in UN/LOCODE (including Tokyo `JPTYO`, Yokohama `JPYOK`, Osaka `JPOSA`, Kobe `JPUKB`, and Nagoya `JPNGO`) and are available in Berthmark, while **1,449** have blank coordinates in UN/LOCODE and are excluded.
+   - **Canada (`CA`):** Out of 580 maritime port rows, **327** have coordinates in UN/LOCODE (such as Victoria `CAVIC`, Argentia `CANWP`, Port Weller `CAPWE`, Port Elgin `CAPEL`, and Port McNeill `CAPMA`) and are available in Berthmark, while **253** have blank coordinates in UNECE's dataset (including `CAMTR` Montreal, `CAHAL` Halifax, `CAVAN` Vancouver, and `CAPRR` Prince Rupert) and are excluded.
+
+### Importing or Refreshing the UN/LOCODE Database
+
+```bash
+# Fetch and import directly from the official UN/LOCODE repository (11,825 maritime ports with coordinates):
+make import-unlocode
+
+# Or import from a local UNECE CSV file or directory:
+backend/.venv/bin/python backend/scripts/import_unlocode.py --csv path/to/code-list.csv
+backend/.venv/bin/python backend/scripts/import_unlocode.py --dir path/to/csv_parts/
+```
 
 ---
 
 ## License
 
 This project is licensed under the MIT License.
+

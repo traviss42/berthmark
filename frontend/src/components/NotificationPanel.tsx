@@ -1,6 +1,7 @@
-import { Bell, BellOff, Check, CheckCheck, AlertTriangle, Mail, FileText } from 'lucide-react';
+import { Bell, BellOff, Check, CheckCheck, AlertTriangle, Mail, FileText, Info } from 'lucide-react';
 import type { Notification } from '@/types';
 import { TIER_COLORS, TIER_LABELS, timeAgo } from '@/utils/riskDisplay';
+import { isDemoAccount } from '@/utils/demoAccount';
 
 interface Props {
   notifications: Notification[];
@@ -24,6 +25,7 @@ export function NotificationPanel({
   loading,
 }: Props) {
   const unread = notifications.filter((n) => !n.read);
+  const isDemo = isDemoAccount(userEmail);
 
   return (
     <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white shadow-xl overflow-hidden">
@@ -47,6 +49,15 @@ export function NotificationPanel({
           </button>
         )}
       </div>
+
+      {isDemo && (
+        <div className="px-3.5 py-2.5 bg-amber-50 border-b border-amber-100 flex items-start gap-2 text-[11px] text-amber-900 leading-tight">
+          <Info className="w-3.5 h-3.5 text-amber-600 flex-shrink-0 mt-0.5" />
+          <span>
+            <strong className="font-semibold">Demo Account:</strong> Email notifications are turned off to prevent bounces. In-app alerts remain active.
+          </span>
+        </div>
+      )}
 
       <div className="max-h-96 overflow-y-auto">
         {loading ? (
