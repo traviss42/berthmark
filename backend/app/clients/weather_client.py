@@ -1,7 +1,8 @@
 """Marine weather client integrating Open-Meteo with offline fallbacks."""
 
 import logging
-from typing import Optional
+import time
+from typing import Dict, Optional, Tuple
 import httpx
 from app.config import get_settings
 from app.models.risk import WeatherMetrics
@@ -19,13 +20,15 @@ def _safe_float(val: object, default: float) -> float:
 
 
 class MarineWeatherClient:
-    """Client for external Marine Weather API with fallback simulation."""
+    """Client for external Marine Weather API with TTL caching and fallback simulation."""
 
     def __init__(self, base_url: Optional[str] = None, timeout: Optional[float] = None):
         settings = get_settings()
         self.base_url = base_url or settings.OPENMETEO_BASE_URL
         self.forecast_url = "https://api.open-meteo.com/v1/forecast"
         self.timeout = timeout or settings.HTTP_TIMEOUT_SECONDS
+        self._cache: Dict[str, Tuple[float, WeatherMetrics]] = {}
+        self.cache_ttl_seconds: float = 900.0  # 15 minutes TTL
 
     def _generate_fallback_weather(self, lat: float, lon: float, port_id: str) -> WeatherMetrics:
         """Deterministic fallback marine weather metrics when external API is offline or rate-limited."""
@@ -44,8 +47,17 @@ class MarineWeatherClient:
             visibilityNm=round(visibility, 1),
         )
 
-    async def get_marine_weather(self, lat: float, lon: float, port_id: str = "") -> WeatherMetrics:
-        """Fetch real-time marine weather metrics from Open-Meteo Marine/Forecast API, or use fallback."""
+    async def get_marine_weather(
+        self, lat: float, lon: float, port_id: str = "", force_refresh: bool = False
+    ) -> WeatherMetrics:
+        """Fetch real-time marine weather metrics with TTL caching."""
+        cache_key = f"{round(lat, 2)}:{round(lon, 2)}"
+        now = time.time()
+
+        if not force_refresh and cache_key in self._cache:
+            cached_time, cached_metrics = self._cache[cache_key]
+            if now - cached_time < self.cache_ttl_seconds:
+                return cached_metrics
         params = {
             "latitude": lat,
             "longitude": lon,
@@ -98,14 +110,18 @@ class MarineWeatherClient:
                     except Exception:
                         pass
 
-                return WeatherMetrics(
+                metrics = WeatherMetrics(
                     windSpeedKnots=round(wind_speed, 1),
                     gustSpeedKnots=round(wind_gust, 1),
                     waveHeightM=round(wave_height, 1),
                     swellPeriodSec=7.5,
                     visibilityNm=8.0,
                 )
+                self._cache[cache_key] = (time.time(), metrics)
+                return metrics
         except Exception as e:
             logger.warning("Failed to reach weather API: %s. Utilizing fallback.", str(e))
 
-        return self._generate_fallback_weather(lat, lon, port_id)
+        fallback = self._generate_fallback_weather(lat, lon, port_id)
+        self._cache[cache_key] = (time.time(), fallback)
+        return fallback

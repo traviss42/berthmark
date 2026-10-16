@@ -1,4 +1,4 @@
-.PHONY: help install install-backend install-frontend test test-backend test-frontend run-backend run-frontend dev seed-db clean
+.PHONY: help install install-backend install-frontend test test-backend test-frontend test-apis run-backend run-frontend dev build seed-db clean
 
 SHELL := /bin/bash
 PYTHON := backend/.venv/bin/python
@@ -68,7 +68,11 @@ seed-db: ## Seed UN/LOCODE SQLite database from maritime_ports.json
 	@echo "==> Seeding UN/LOCODE maritime database..."
 	@PYTHONPATH=backend $(PYTHON) backend/scripts/import_unlocode.py --seed
 
+build: ## Build frontend production assets
+	@echo "==> Building frontend production bundle..."
+	@$(NPM) run build --prefix frontend
+
 clean: ## Remove temporary cache and build artifacts
 	@echo "==> Cleaning cache and build artifacts..."
-	@rm -rf backend/.pytest_cache frontend/node_modules/.vite
+	@rm -rf backend/.pytest_cache frontend/node_modules/.vite frontend/dist
 	@find backend -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true

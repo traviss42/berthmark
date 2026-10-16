@@ -1,7 +1,8 @@
 """Risk evaluation service implementing multi-factor scoring and the weakest-link composite rule."""
 
+import time
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from app.clients.ais_client import AISClient
 from app.clients.weather_client import MarineWeatherClient
 from app.models.common import RiskTier, SubRiskCategory, VesselClass
@@ -62,6 +63,9 @@ class RiskService:
         self.weather_client = weather_client or MarineWeatherClient()
         self.ais_client = ais_client or AISClient()
         self.port_service = port_svc or default_port_service
+        self._assessment_cache: Dict[str, Tuple[float, RiskAssessment]] = {}
+        self._trend_cache: Dict[str, Tuple[float, List[RiskAssessment]]] = {}
+        self.cache_ttl_seconds: float = 300.0  # 5 minutes TTL
 
     def _assess_congestion(self, metrics: PortMetrics) -> SubRiskResult:
         c = metrics.congestion
@@ -245,11 +249,20 @@ class RiskService:
     async def get_risk_assessment(
         self,
         port_id: str,
-        port_name: Optional[str],
-        vessel_class: VesselClass,
+        port_name: Optional[str] = None,
+        vessel_class: VesselClass = "neoPanamax",
         user_id: Optional[str] = None,
+        force_refresh: bool = False,
     ) -> RiskAssessment:
-        """Evaluate real-time risk assessment for a port and vessel class."""
+        """Evaluate real-time risk assessment for a port and vessel class with TTL caching."""
+        cache_key = f"{port_id}:{vessel_class}"
+        now_time = time.time()
+
+        if not force_refresh and cache_key in self._assessment_cache:
+            cached_time, cached_assessment = self._assessment_cache[cache_key]
+            if now_time - cached_time < self.cache_ttl_seconds:
+                return cached_assessment
+
         # Find port to extract lat/lon/locode
         port = None
         try:
@@ -262,11 +275,19 @@ class RiskService:
         locode = port.locode if port else "NLRTM"
         display_name = port_name or (port.name if port else port_id)
 
-        # Call external clients (with their fallback mechanisms)
+        # Call external clients (with TTL caching and fallback mechanisms)
         radius = port.geofenceRadiusNm if port else 8.0
-        weather = await self.weather_client.get_marine_weather(lat, lon, port_id)
+        weather = await self.weather_client.get_marine_weather(
+            lat, lon, port_id, force_refresh=force_refresh
+        )
         congestion, terminal, navigational = await self.ais_client.get_port_traffic_metrics(
-            port_id, locode, vessel_class, lat=lat, lon=lon, geofence_radius_nm=radius
+            port_id,
+            locode,
+            vessel_class,
+            lat=lat,
+            lon=lon,
+            geofence_radius_nm=radius,
+            force_refresh=force_refresh,
         )
 
         now_str = datetime.now(timezone.utc).isoformat()
@@ -289,7 +310,7 @@ class RiskService:
         composite_tier, composite_score = self._compute_composite(sub_risks)
         class_info = VESSEL_CLASS_METADATA.get(vessel_class, {"label": vessel_class})
 
-        return RiskAssessment(
+        assessment = RiskAssessment(
             id=f"risk-{port_id}-{vessel_class}-{int(time_seed_now())}",
             portId=port_id,
             portName=display_name,
@@ -302,10 +323,17 @@ class RiskService:
             metrics=metrics,
         )
 
+        self._assessment_cache[cache_key] = (now_time, assessment)
+        return assessment
+
     async def get_bulk_assessments(
-        self, ports: List[PortRef], vessel_class: VesselClass, user_id: Optional[str] = None
+        self,
+        ports: List[PortRef],
+        vessel_class: VesselClass,
+        user_id: Optional[str] = None,
+        force_refresh: bool = False,
     ) -> List[RiskAssessment]:
-        """Evaluate risk across multiple ports for dashboard overview."""
+        """Evaluate risk across multiple ports with caching."""
         results: List[RiskAssessment] = []
         for p in ports:
             assessment = await self.get_risk_assessment(
@@ -313,6 +341,7 @@ class RiskService:
                 port_name=p.name,
                 vessel_class=vessel_class,
                 user_id=user_id,
+                force_refresh=force_refresh,
             )
             results.append(assessment)
         return results
@@ -323,9 +352,18 @@ class RiskService:
         vessel_class: VesselClass,
         days: int = 7,
         user_id: Optional[str] = None,
+        force_refresh: bool = False,
     ) -> List[RiskAssessment]:
-        """Return chronological 6-hour evaluation cycles for trend charts."""
+        """Return chronological 6-hour evaluation cycles for trend charts with caching."""
         days = min(max(days, 1), 30)
+        cache_key = f"{port_id}:{vessel_class}:{days}"
+        now_time = time.time()
+
+        if not force_refresh and cache_key in self._trend_cache:
+            cached_time, cached_trend = self._trend_cache[cache_key]
+            if now_time - cached_time < self.cache_ttl_seconds:
+                return cached_trend
+
         points = min(days * 4, 40)  # 4 cycles per day, max 40 points
 
         port = None
@@ -334,29 +372,58 @@ class RiskService:
         except Exception:
             pass
         port_name = port.name if port else port_id
+        lat = port.lat if port else 51.9
+        lon = port.lon if port else 4.4
+        locode = port.locode if port else "NLRTM"
+        radius = port.geofenceRadiusNm if port else 8.0
+
+        # Anchor base metrics using current real readings
+        base_weather = await self.weather_client.get_marine_weather(
+            lat, lon, port_id, force_refresh=force_refresh
+        )
+        base_congestion, base_terminal, base_navigational = (
+            await self.ais_client.get_port_traffic_metrics(
+                port_id,
+                locode,
+                vessel_class,
+                lat=lat,
+                lon=lon,
+                geofence_radius_nm=radius,
+                force_refresh=force_refresh,
+            )
+        )
 
         assessments: List[RiskAssessment] = []
         now = datetime.now(timezone.utc)
+        class_info = VESSEL_CLASS_METADATA.get(vessel_class, {"label": vessel_class})
 
         for i in range(points - 1, -1, -1):
             ts = now - timedelta(hours=i * 6)
             ts_str = ts.isoformat()
-            shifted_port_id = f"{port_id}-{i}"
 
-            weather = await self.weather_client.get_marine_weather(
-                port.lat if port else 50.0, port.lon if port else 0.0, shifted_port_id
+            # Slight realistic historical variance based on cycle index
+            cycle_shift = (i % 7) - 3
+            weather_point = base_weather.model_copy(
+                update={
+                    "windSpeedKnots": max(5.0, round(base_weather.windSpeedKnots + cycle_shift * 1.5, 1)),
+                    "gustSpeedKnots": max(7.0, round(base_weather.gustSpeedKnots + cycle_shift * 2.0, 1)),
+                    "waveHeightM": max(0.5, round(base_weather.waveHeightM + cycle_shift * 0.2, 1)),
+                }
             )
-            congestion, terminal, navigational = await self.ais_client.get_port_traffic_metrics(
-                shifted_port_id, port.locode if port else "NLRTM", vessel_class
+            congestion_point = base_congestion.model_copy(
+                update={
+                    "anchorageQueueCount": max(1, base_congestion.anchorageQueueCount + cycle_shift),
+                    "avgWaitingTimeHours": max(2.0, round(base_congestion.avgWaitingTimeHours + cycle_shift * 1.2, 1)),
+                }
             )
 
             metrics = PortMetrics(
                 portId=port_id,
                 timestamp=ts_str,
-                congestion=congestion,
-                terminal=terminal,
-                weather=weather,
-                navigational=navigational,
+                congestion=congestion_point,
+                terminal=base_terminal,
+                weather=weather_point,
+                navigational=base_navigational,
             )
 
             sub_risks: Dict[SubRiskCategory, SubRiskResult] = {
@@ -367,7 +434,6 @@ class RiskService:
             }
 
             composite_tier, composite_score = self._compute_composite(sub_risks)
-            class_info = VESSEL_CLASS_METADATA.get(vessel_class, {"label": vessel_class})
 
             assessments.append(
                 RiskAssessment(
@@ -384,6 +450,7 @@ class RiskService:
                 )
             )
 
+        self._trend_cache[cache_key] = (now_time, assessments)
         return assessments
 
 

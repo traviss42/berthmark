@@ -73,6 +73,9 @@ async function request<T>(
 }
 
 export class ApiPortService implements IPortService {
+  private searchCache = new Map<string, { timestamp: number; results: Port[] }>();
+  private readonly searchCacheTtlMs = 300000; // 5 minutes
+
   constructor(private baseUrl?: string) {}
 
   async getPorts(userId: string): Promise<Port[]> {
@@ -88,11 +91,22 @@ export class ApiPortService implements IPortService {
     if (!q) {
       return [];
     }
-    return request<Port[]>(
+
+    const cacheKey = q.toLowerCase();
+    const cached = this.searchCache.get(cacheKey);
+    const now = Date.now();
+    if (cached && now - cached.timestamp < this.searchCacheTtlMs) {
+      return cached.results;
+    }
+
+    const results = await request<Port[]>(
       `/api/v1/ports/search?q=${encodeURIComponent(q)}`,
       { method: 'GET' },
       this.baseUrl
     );
+
+    this.searchCache.set(cacheKey, { timestamp: now, results });
+    return results;
   }
 
   async addPort(
@@ -126,12 +140,14 @@ export class ApiRiskService implements IRiskService {
   async getRiskAssessment(
     portId: string,
     portName: string,
-    vesselClass: VesselClass
+    vesselClass: VesselClass,
+    forceRefresh: boolean = false
   ): Promise<RiskAssessment> {
-    const query = new URLSearchParams({
-      vesselClass,
-      ...(portName ? { portName } : {}),
-    });
+    const params: Record<string, string> = { vesselClass };
+    if (portName) params.portName = portName;
+    if (forceRefresh) params.forceRefresh = 'true';
+
+    const query = new URLSearchParams(params);
     return request<RiskAssessment>(
       `/api/v1/ports/${encodeURIComponent(portId)}/risk?${query.toString()}`,
       { method: 'GET' },
@@ -141,16 +157,24 @@ export class ApiRiskService implements IRiskService {
 
   async getBulkRiskAssessments(
     ports: { id: string; name: string }[],
-    vesselClass: VesselClass
+    vesselClass: VesselClass,
+    forceRefresh: boolean = false
   ): Promise<RiskAssessment[]> {
     if (ports.length === 0) {
       return [];
+    }
+    const body: { ports: { id: string; name: string }[]; vesselClass: VesselClass; forceRefresh?: boolean } = {
+      ports,
+      vesselClass,
+    };
+    if (forceRefresh) {
+      body.forceRefresh = true;
     }
     return request<RiskAssessment[]>(
       '/api/v1/risk/bulk-assessments',
       {
         method: 'POST',
-        body: JSON.stringify({ ports, vesselClass }),
+        body: JSON.stringify(body),
       },
       this.baseUrl
     );
@@ -159,10 +183,18 @@ export class ApiRiskService implements IRiskService {
   async getHistoricalTrend(
     portId: string,
     vesselClass: VesselClass,
-    days: number
+    days: number,
+    forceRefresh: boolean = false
   ): Promise<RiskAssessment[]> {
+    const params: Record<string, string> = {
+      vesselClass,
+      days: String(days),
+    };
+    if (forceRefresh) params.forceRefresh = 'true';
+
+    const query = new URLSearchParams(params);
     return request<RiskAssessment[]>(
-      `/api/v1/ports/${encodeURIComponent(portId)}/risk/trend?vesselClass=${encodeURIComponent(vesselClass)}&days=${days}`,
+      `/api/v1/ports/${encodeURIComponent(portId)}/risk/trend?${query.toString()}`,
       { method: 'GET' },
       this.baseUrl
     );

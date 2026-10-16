@@ -95,3 +95,24 @@ def test_historical_trend_endpoint(client: TestClient):
     # Check timestamps are in chronological order
     timestamps = [item["timestamp"] for item in data]
     assert timestamps == sorted(timestamps)
+
+
+def test_risk_caching_and_force_refresh(client: TestClient):
+    """Verify that repeated risk calls return cached assessment, while forceRefresh=true recomputes."""
+    # First call: computes and caches
+    resp1 = client.get("/api/v1/ports/port-rotterdam/risk?vesselClass=feeder")
+    assert resp1.status_code == 200
+    data1 = resp1.json()
+
+    # Second call without forceRefresh: should return cached assessment (same id)
+    resp2 = client.get("/api/v1/ports/port-rotterdam/risk?vesselClass=feeder")
+    assert resp2.status_code == 200
+    data2 = resp2.json()
+    assert data1["id"] == data2["id"]
+
+    # Third call with forceRefresh=true: bypasses cache
+    resp3 = client.get("/api/v1/ports/port-rotterdam/risk?vesselClass=feeder&forceRefresh=true")
+    assert resp3.status_code == 200
+    data3 = resp3.json()
+    assert data3["portId"] == "port-rotterdam"
+

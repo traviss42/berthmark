@@ -40,11 +40,11 @@ def test_get_monitored_ports_unauthorized(client: TestClient):
 
 
 def test_get_monitored_ports_authorized(client: TestClient, auth_headers: dict):
-    """GET /api/v1/ports returns default ports for authenticated user."""
+    """GET /api/v1/ports returns monitored ports for authenticated user (starts empty, user selects their own)."""
     resp = client.get("/api/v1/ports", headers=auth_headers)
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data) >= 6
+    assert isinstance(data, list)
 
 
 def test_add_and_remove_custom_port(client: TestClient, auth_headers: dict):
@@ -85,10 +85,10 @@ def test_add_and_remove_custom_port(client: TestClient, auth_headers: dict):
     assert not any(p["id"] == port_id for p in list_after.json())
 
 
-def test_cannot_delete_default_port(client: TestClient, auth_headers: dict):
-    """DELETE /api/v1/ports/{portId} rejects deletion of default ports with 403."""
-    resp = client.delete("/api/v1/ports/port-rotterdam", headers=auth_headers)
-    assert resp.status_code == 403
+def test_cannot_delete_non_monitored_port(client: TestClient, auth_headers: dict):
+    """DELETE /api/v1/ports/{portId} returns 404 if port is not in user's monitored list."""
+    resp = client.delete("/api/v1/ports/port-nonexistent", headers=auth_headers)
+    assert resp.status_code == 404
 
 
 def test_port_privacy_multi_tenant(

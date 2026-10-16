@@ -57,7 +57,7 @@ export default function App() {
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await refreshRisk();
+      await refreshRisk(true);
     } finally {
       setRefreshing(false);
     }
@@ -71,16 +71,19 @@ export default function App() {
     if (!selectedPort) return;
     setRefreshing(true);
     try {
-      await refreshRisk();
+      await refreshRisk(true);
     } finally {
       setRefreshing(false);
     }
   }, [refreshRisk, selectedPort]);
 
-  const handleRemovePort = useCallback(async () => {
-    if (!selectedPortId) return;
-    await removePort(selectedPortId);
-    setSelectedPortId(null);
+  const handleRemovePort = useCallback(async (portId?: string) => {
+    const targetId = portId || selectedPortId;
+    if (!targetId) return;
+    await removePort(targetId);
+    if (selectedPortId === targetId) {
+      setSelectedPortId(null);
+    }
   }, [removePort, selectedPortId]);
 
   const existingLocodes = useMemo(() => ports.map((p) => p.locode), [ports]);
@@ -176,8 +179,8 @@ export default function App() {
           <PortRiskDetail
             assessment={selectedAssessment}
             onBack={() => setSelectedPortId(null)}
-            onRemove={handleRemovePort}
-            canRemove={!selectedPort.isDefault}
+            onRemove={() => handleRemovePort(selectedPort.id)}
+            canRemove={true}
             onRefresh={handleRefreshDetail}
             refreshing={refreshing}
           />
@@ -242,6 +245,7 @@ export default function App() {
                 ports={ports}
                 assessments={assessmentMap}
                 onSelectPort={handleSelectPort}
+                onRemovePort={(id) => handleRemovePort(id)}
                 loading={portsLoading || riskLoading}
               />
             </div>

@@ -20,6 +20,7 @@ async def get_port_risk_assessment(
     portId: str,
     vesselClass: VesselClass = Query(..., description="Target vessel class"),
     portName: Optional[str] = Query(None, description="Optional port name"),
+    forceRefresh: bool = Query(False, description="Bypass cache and force fresh data fetch"),
     current_user: Optional[str] = Depends(get_optional_current_user),
     service: RiskService = Depends(lambda: risk_service),
 ) -> RiskAssessment:
@@ -28,6 +29,7 @@ async def get_port_risk_assessment(
         port_name=portName,
         vessel_class=vesselClass,
         user_id=current_user,
+        force_refresh=forceRefresh,
     )
 
 
@@ -46,6 +48,7 @@ async def get_bulk_risk_assessments(
         ports=request.ports,
         vessel_class=request.vesselClass,
         user_id=current_user,
+        force_refresh=request.forceRefresh,
     )
 
 
@@ -59,6 +62,7 @@ async def get_historical_risk_trend(
     portId: str,
     vesselClass: VesselClass = Query(..., description="Target vessel class"),
     days: int = Query(7, ge=1, le=30, description="Number of historical days"),
+    forceRefresh: bool = Query(False, description="Bypass cache and force fresh data fetch"),
     current_user: Optional[str] = Depends(get_optional_current_user),
     service: RiskService = Depends(lambda: risk_service),
 ) -> List[RiskAssessment]:
@@ -67,4 +71,5 @@ async def get_historical_risk_trend(
         vessel_class=vesselClass,
         days=days,
         user_id=current_user,
+        force_refresh=forceRefresh,
     )

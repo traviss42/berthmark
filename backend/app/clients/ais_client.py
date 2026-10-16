@@ -155,13 +155,14 @@ class AISClient:
         lat: Optional[float] = None,
         lon: Optional[float] = None,
         geofence_radius_nm: float = 8.0,
+        force_refresh: bool = False,
     ) -> Tuple[CongestionMetrics, TerminalMetrics, NavigationalMetrics]:
         """Fetch AIS and operational metrics with WebSocket live sampling and cache."""
         cache_key = f"{port_id}:{vessel_class}"
         now = time.time()
-        if cache_key in self._cache:
+        if not force_refresh and cache_key in self._cache:
             ts, cached_metrics = self._cache[cache_key]
-            if now - ts < 120.0:  # 2 minute cache
+            if now - ts < 300.0:  # 5 minute cache
                 return cached_metrics
 
         # 1. Check HTTP mock for unit tests

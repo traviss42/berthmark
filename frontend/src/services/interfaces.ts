@@ -19,12 +19,23 @@ export interface IPortService {
 }
 
 export interface IRiskService {
-  getRiskAssessment(portId: string, portName: string, vesselClass: VesselClass): Promise<RiskAssessment>;
+  getRiskAssessment(
+    portId: string,
+    portName: string,
+    vesselClass: VesselClass,
+    forceRefresh?: boolean
+  ): Promise<RiskAssessment>;
   getBulkRiskAssessments(
     ports: { id: string; name: string }[],
-    vesselClass: VesselClass
+    vesselClass: VesselClass,
+    forceRefresh?: boolean
   ): Promise<RiskAssessment[]>;
-  getHistoricalTrend(portId: string, vesselClass: VesselClass, days: number): Promise<RiskAssessment[]>;
+  getHistoricalTrend(
+    portId: string,
+    vesselClass: VesselClass,
+    days: number,
+    forceRefresh?: boolean
+  ): Promise<RiskAssessment[]>;
 }
 
 export interface INotificationService {

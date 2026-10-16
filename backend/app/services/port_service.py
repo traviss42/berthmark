@@ -23,10 +23,8 @@ class PortService:
         self._user_ports: Dict[str, Dict[str, Port]] = {}
 
     async def get_ports(self, user_id: str) -> List[Port]:
-        """Return default global ports plus custom ports added by this user."""
-        defaults = list(self._default_ports.values())
-        user_added = list(self._user_ports.get(user_id, {}).values())
-        return defaults + user_added
+        """Return ports monitored by this user (not prepopulated; user selects their own)."""
+        return list(self._user_ports.get(user_id, {}).values())
 
     async def get_default_ports(self) -> List[Port]:
         """Return only default global ports from the UN/LOCODE database."""
@@ -37,14 +35,14 @@ class PortService:
         return await self.directory_client.search_ports(query)
 
     async def get_port_by_id(self, port_id: str, user_id: Optional[str] = None) -> Port:
-        """Find a port by ID in the database or user custom ports."""
-        if port_id in self._default_ports:
-            return self._default_ports[port_id]
-
+        """Find a port by ID in user monitored ports, default hubs, or global database."""
         if user_id and user_id in self._user_ports:
             user_port = self._user_ports[user_id].get(port_id)
             if user_port:
                 return user_port
+
+        if port_id in self._default_ports:
+            return self._default_ports[port_id]
 
         # Search database directly
         db_port = self.directory_client.get_port_by_id(port_id)
@@ -86,18 +84,12 @@ class PortService:
         return new_port
 
     async def remove_port(self, port_id: str, user_id: str) -> None:
-        """Remove a custom user-added port. Default ports cannot be removed."""
-        if port_id in self._default_ports:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Default global ports cannot be removed from tracking.",
-            )
-
+        """Remove a port from the user's monitored portfolio."""
         user_dict = self._user_ports.get(user_id, {})
         if port_id not in user_dict:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Custom port with ID '{port_id}' not found in user's monitored list.",
+                detail=f"Port with ID '{port_id}' not found in user's monitored list.",
             )
 
         del user_dict[port_id]

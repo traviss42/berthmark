@@ -56,26 +56,30 @@ export function useRiskAssessments(
   const [error, setError] = useState<string | null>(null);
   const services = getServices();
 
-  const refresh = useCallback(async () => {
-    if (ports.length === 0) {
-      setAssessments([]);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await services.risk.getBulkRiskAssessments(
-        ports.map((p) => ({ id: p.id, name: p.name })),
-        vesselClass
-      );
-      setAssessments(data);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load risk data');
-    } finally {
-      setLoading(false);
-    }
-  }, [services, ports, vesselClass]);
+  const refresh = useCallback(
+    async (forceRefresh: boolean = false) => {
+      if (ports.length === 0) {
+        setAssessments([]);
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
+      setError(null);
+      try {
+        const data = await services.risk.getBulkRiskAssessments(
+          ports.map((p) => ({ id: p.id, name: p.name })),
+          vesselClass,
+          forceRefresh
+        );
+        setAssessments(data);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to load risk data');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [services, ports, vesselClass]
+  );
 
   useEffect(() => {
     refresh();

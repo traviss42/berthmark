@@ -74,3 +74,4 @@ class PortRef(BaseModel):
 class BulkRiskAssessmentRequest(BaseModel):
     ports: List[PortRef]
     vesselClass: VesselClass
+    forceRefresh: bool = False
