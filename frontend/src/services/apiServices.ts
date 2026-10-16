@@ -12,7 +12,7 @@ import type {
   IServices,
 } from '@/services/interfaces';
 
-export const DEFAULT_API_URL = 'http://localhost:8000';
+export const DEFAULT_API_URL = '';
 
 export function getApiBaseUrl(): string {
   if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) {

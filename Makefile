@@ -1,5 +1,6 @@
 .PHONY: help install install-backend install-frontend test test-backend test-frontend run-backend run-frontend dev seed-db clean
 
+SHELL := /bin/bash
 PYTHON := backend/.venv/bin/python
 UVICORN := backend/.venv/bin/uvicorn
 PYTEST := backend/.venv/bin/pytest
@@ -40,7 +41,7 @@ test-frontend: ## Run frontend tests with vitest
 
 run-backend: ## Start FastAPI backend server on http://localhost:8000
 	@echo "==> Starting FastAPI backend server..."
-	@PYTHONPATH=backend $(UVICORN) app.main:app --reload --port 8000
+	@PYTHONPATH=backend $(UVICORN) app.main:app --reload --host 0.0.0.0 --port 8000
 
 run-frontend: ## Start React frontend development server on http://localhost:5173
 	@echo "==> Starting React Vite frontend..."
@@ -51,10 +52,13 @@ dev: ## Run both backend and frontend servers concurrently (Ctrl+C stops both)
 	@echo "  • Backend API:     http://localhost:8000/docs"
 	@echo "  • Frontend WebApp: http://localhost:5173"
 	@echo "Press Ctrl+C to stop both servers."
-	@trap 'kill 0' INT TERM EXIT; \
-	(PYTHONPATH=backend $(UVICORN) app.main:app --reload --port 8000) & \
-	($(NPM) run dev --prefix frontend) & \
-	wait
+	@bash -c '\
+		PYTHONPATH=backend $(UVICORN) app.main:app --reload --host 0.0.0.0 --port 8000 & \
+		BACKEND_PID=$$!; \
+		$(NPM) run dev --prefix frontend & \
+		FRONTEND_PID=$$!; \
+		trap "kill $$BACKEND_PID $$FRONTEND_PID 2>/dev/null || true; exit 0" INT TERM; \
+		wait $$BACKEND_PID $$FRONTEND_PID'
 
 seed-db: ## Seed UN/LOCODE SQLite database from maritime_ports.json
 	@echo "==> Seeding UN/LOCODE maritime database..."
