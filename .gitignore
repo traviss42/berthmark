@@ -68,3 +68,12 @@ lerna-debug.log*
 *.swo
 .DS_Store
 Thumbs.db
+
+# Emacs
+*~
+\#*\#
+.#*
+auto-save-list/
+tramp
+.dir-locals-2.el
+
