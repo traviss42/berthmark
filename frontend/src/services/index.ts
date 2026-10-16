@@ -1,31 +1,20 @@
 import type { IServices } from '@/services/interfaces';
-import { createApiServices, ApiPortService, ApiRiskService, ApiNotificationService } from '@/services/apiServices';
-import { MockPortService } from '@/services/mockPortService';
-import { MockRiskService } from '@/services/mockRiskService';
-import { MockNotificationService } from '@/services/mockNotificationService';
+import {
+  createApiServices,
+  ApiPortService,
+  ApiRiskService,
+  ApiNotificationService,
+} from '@/services/apiServices';
 
 // ── Service container ──
-// Connects to the FastAPI backend REST API (/api/v1).
-// To use mock services in offline tests or demos, set VITE_USE_MOCK_SERVICES=true
-// or call setServices(createMockServices()).
+// Connects exclusively to the real FastAPI backend REST API (/api/v1) backed by
+// live UN/LOCODE SQLite database, Open-Meteo Marine/Forecast, and AISStream WebSocket.
 
 let current: IServices | null = null;
 
-export function createMockServices(): IServices {
-  return {
-    ports: new MockPortService(),
-    risk: new MockRiskService(),
-    notifications: new MockNotificationService(),
-  };
-}
-
 export function getServices(): IServices {
   if (!current) {
-    const useMocks =
-      typeof import.meta !== 'undefined' &&
-      import.meta.env?.VITE_USE_MOCK_SERVICES === 'true';
-
-    current = useMocks ? createMockServices() : createApiServices();
+    current = createApiServices();
   }
   return current;
 }
@@ -39,9 +28,6 @@ export {
   ApiPortService,
   ApiRiskService,
   ApiNotificationService,
-  MockPortService,
-  MockRiskService,
-  MockNotificationService,
 };
 
 export type { IServices } from '@/services/interfaces';

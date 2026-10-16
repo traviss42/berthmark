@@ -159,6 +159,19 @@ class UnlocodeDatabase:
                 return self._row_to_port(row)
         return None
 
+    def get_port_by_id(self, port_id: str) -> Optional[Port]:
+        """Fetch port by unique ID from UN/LOCODE database."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM unlocode_ports WHERE id = ? LIMIT 1;",
+                (port_id,),
+            )
+            row = cursor.fetchone()
+            if row:
+                return self._row_to_port(row)
+        return None
+
     def get_default_ports(self) -> List[Port]:
         """Fetch all global default ports."""
         with self._get_connection() as conn:

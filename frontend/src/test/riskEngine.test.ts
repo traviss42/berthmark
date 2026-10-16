@@ -1,7 +1,40 @@
 import { describe, it, expect } from 'vitest';
 import { assessRisk, computeCompositeTier } from '@/services/riskEngine';
-import { generateMockMetrics } from '@/data/mockData';
-import type { PortMetrics, SubRiskResult, SubRiskCategory, RiskTier } from '@/types';
+import type { PortMetrics, SubRiskResult, SubRiskCategory, RiskTier, VesselClass } from '@/types';
+
+function createSampleMetrics(portId: string = 'test-port'): PortMetrics {
+  return {
+    portId,
+    timestamp: '2026-10-16T00:00:00Z',
+    congestion: {
+      anchorageQueueCount: 10,
+      avgWaitingTimeHours: 18.0,
+      berthOccupancyPct: 70.0,
+      rolling30dAvgQueue: 9.0,
+      rolling30dAvgWaitHours: 16.0,
+    },
+    terminal: {
+      berthTurnaroundHours: 28.0,
+      berthToAnchorageWaitRatio: 0.45,
+      dwellTimeAnomalyScore: 30.0,
+      rolling30dAvgTurnaround: 26.0,
+    },
+    weather: {
+      windSpeedKnots: 15.0,
+      waveHeightM: 1.5,
+      swellPeriodSec: 7.0,
+      visibilityNm: 10.0,
+      gustSpeedKnots: 20.0,
+    },
+    navigational: {
+      underKeelClearanceM: 3.0,
+      channelDepthM: 16.0,
+      airDraftClearanceM: 10.0,
+      pilotageAvailable: true,
+      tideHeightM: 1.5,
+    },
+  };
+}
 
 function makeSubRisk(tier: RiskTier): SubRiskResult {
   return {
@@ -68,7 +101,7 @@ describe('Risk Engine - Composite Tier (Weakest-Link Rule)', () => {
 
 describe('Risk Engine - assessRisk', () => {
   it('produces a complete risk assessment with all sub-risks', () => {
-    const metrics = generateMockMetrics('port-test', 'panamax');
+    const metrics = createSampleMetrics('port-test');
     const assessment = assessRisk('port-test', 'Test Port', 'panamax', metrics);
 
     expect(assessment.portId).toBe('port-test');
@@ -82,7 +115,7 @@ describe('Risk Engine - assessRisk', () => {
   });
 
   it('composite tier matches weakest-link of sub-risks', () => {
-    const metrics = generateMockMetrics('port-test2', 'feeder');
+    const metrics = createSampleMetrics('port-test2');
     const assessment = assessRisk('port-test2', 'Test Port 2', 'feeder', metrics);
 
     const subTiers: RiskTier[] = Object.values(assessment.subRisks).map((r) => r.tier);
@@ -95,8 +128,8 @@ describe('Risk Engine - assessRisk', () => {
   });
 
   it('is deterministic for the same port + vessel class', () => {
-    const m1 = generateMockMetrics('port-deterministic', 'suezmax');
-    const m2 = generateMockMetrics('port-deterministic', 'suezmax');
+    const m1 = createSampleMetrics('port-deterministic');
+    const m2 = createSampleMetrics('port-deterministic');
     const a1 = assessRisk('port-deterministic', 'D Port', 'suezmax', m1);
     const a2 = assessRisk('port-deterministic', 'D Port', 'suezmax', m2);
     expect(a1.compositeTier).toBe(a2.compositeTier);
@@ -106,7 +139,7 @@ describe('Risk Engine - assessRisk', () => {
 
 describe('Risk Engine - Weather assessment by vessel class', () => {
   function makeWeatherMetrics(windKnots: number): PortMetrics {
-    const base = generateMockMetrics('weather-test', 'feeder');
+    const base = createSampleMetrics('weather-test');
     return {
       ...base,
       weather: {

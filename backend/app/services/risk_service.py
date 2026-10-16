@@ -263,9 +263,10 @@ class RiskService:
         display_name = port_name or (port.name if port else port_id)
 
         # Call external clients (with their fallback mechanisms)
+        radius = port.geofenceRadiusNm if port else 8.0
         weather = await self.weather_client.get_marine_weather(lat, lon, port_id)
         congestion, terminal, navigational = await self.ais_client.get_port_traffic_metrics(
-            port_id, locode, vessel_class
+            port_id, locode, vessel_class, lat=lat, lon=lon, geofence_radius_nm=radius
         )
 
         now_str = datetime.now(timezone.utc).isoformat()

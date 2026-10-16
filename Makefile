@@ -39,6 +39,10 @@ test-frontend: ## Run frontend tests with vitest
 	@echo "==> Running frontend vitest suite..."
 	@$(NPM) run test --prefix frontend
 
+test-apis: ## Test live connectivity to all external APIs (UN/LOCODE, Open-Meteo, AISStream)
+	@echo "==> Testing live external APIs connectivity..."
+	@PYTHONPATH=backend $(PYTHON) backend/scripts/test_apis.py
+
 run-backend: ## Start FastAPI backend server on http://localhost:8000
 	@echo "==> Starting FastAPI backend server..."
 	@PYTHONPATH=backend $(UVICORN) app.main:app --reload --host 0.0.0.0 --port 8000

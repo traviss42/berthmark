@@ -1,24 +1,23 @@
-"""Port management service implementing multi-tenant isolation and directory discovery."""
+"""Port management service implementing multi-tenant isolation and UN/LOCODE directory discovery."""
 
 import time
 import uuid
 from typing import Dict, List, Optional
 from fastapi import HTTPException, status
-from app.clients.ports_client import FALLBACK_GLOBAL_PORTS, PortDirectoryClient
+from app.clients.ports_client import PortDirectoryClient
 from app.models.port import CreatePortRequest, Port
 
 
 class PortService:
-    """Service for managing default and user-monitored ports."""
+    """Service for managing default and user-monitored ports using real UN/LOCODE database."""
 
     def __init__(self, directory_client: Optional[PortDirectoryClient] = None):
         self.directory_client = directory_client or PortDirectoryClient()
 
-        # In-memory store for default ports
+        # In-memory index of default ports from UN/LOCODE SQLite database
         self._default_ports: Dict[str, Port] = {}
-        for p in FALLBACK_GLOBAL_PORTS:
-            if p.get("isDefault"):
-                self._default_ports[p["id"]] = Port(**p)
+        for p in self.directory_client.get_default_ports():
+            self._default_ports[p.id] = p
 
         # In-memory store for custom user ports: user_id -> dict of port_id -> Port
         self._user_ports: Dict[str, Dict[str, Port]] = {}
@@ -30,15 +29,15 @@ class PortService:
         return defaults + user_added
 
     async def get_default_ports(self) -> List[Port]:
-        """Return only default global ports."""
+        """Return only default global ports from the UN/LOCODE database."""
         return list(self._default_ports.values())
 
     async def search_ports(self, query: str) -> List[Port]:
-        """Search global directory and searchable ports."""
+        """Search global UN/LOCODE database."""
         return await self.directory_client.search_ports(query)
 
     async def get_port_by_id(self, port_id: str, user_id: Optional[str] = None) -> Port:
-        """Find a port by ID, ensuring privacy isolation for user ports."""
+        """Find a port by ID in the database or user custom ports."""
         if port_id in self._default_ports:
             return self._default_ports[port_id]
 
@@ -47,10 +46,10 @@ class PortService:
             if user_port:
                 return user_port
 
-        # Search searchable catalog fallback
-        for p in FALLBACK_GLOBAL_PORTS:
-            if p["id"] == port_id:
-                return Port(**p)
+        # Search database directly
+        db_port = self.directory_client.get_port_by_id(port_id)
+        if db_port:
+            return db_port
 
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
