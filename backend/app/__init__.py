@@ -1,0 +1,1 @@
+"""Berthmark FastAPI application package."""
