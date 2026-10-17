@@ -7,7 +7,6 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.clients.ais_client import AISClient
-from app.clients.ais_client import AISClient
 from app.clients.ais_stream_manager import get_stream_manager
 from app.clients.weather_client import MarineWeatherClient
 from app.db.models import MonitoredPort
@@ -23,23 +22,49 @@ _ais_client = AISClient()
 
 
 def get_monitored_ports_for_ingestion() -> List[Dict[str, Any]]:
-    """Gather all user-monitored ports from the database (no default hubs)."""
+    """Gather all global default ports plus user-monitored ports for continuous telemetry ingestion."""
     ports_to_ingest: List[Dict[str, Any]] = []
+    seen_locodes = set()
+
+    # 1. Global default ports from UN/LOCODE reference database
+    try:
+        from app.clients.unlocode_db import UnlocodeDatabase
+        db_ref = UnlocodeDatabase()
+        for dp in db_ref.get_default_ports():
+            code = dp.locode.upper()
+            seen_locodes.add(code)
+            ports_to_ingest.append({
+                "id": dp.id,
+                "name": dp.name,
+                "locode": dp.locode,
+                "lat": dp.lat,
+                "lon": dp.lon,
+                "geofence": dp.geofenceRadiusNm or 8.0,
+                "vessel_class": dp.vesselClass or "neoPanamax",
+            })
+    except Exception as e:
+        logger.warning("Failed to query default ports for ingestion: %s", str(e))
+
+    # 2. User-monitored custom ports from SQLite
     try:
         with get_db_context() as db:
             monitored = db.query(MonitoredPort).all()
             for mp in monitored:
-                ports_to_ingest.append({
-                    "id": mp.id,
-                    "name": mp.name,
-                    "locode": mp.locode,
-                    "lat": mp.lat,
-                    "lon": mp.lon,
-                    "geofence": mp.geofence_radius_nm,
-                    "vessel_class": mp.vessel_class,
-                })
+                code = mp.locode.upper()
+                if code not in seen_locodes:
+                    seen_locodes.add(code)
+                    ports_to_ingest.append({
+                        "id": mp.id,
+                        "name": mp.name,
+                        "locode": mp.locode,
+                        "lat": mp.lat,
+                        "lon": mp.lon,
+                        "geofence": mp.geofence_radius_nm,
+                        "vessel_class": mp.vessel_class,
+                    })
     except Exception as e:
         logger.warning("Failed to query monitored ports for ingestion: %s", str(e))
+
     return ports_to_ingest
 
 

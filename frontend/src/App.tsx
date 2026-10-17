@@ -23,6 +23,7 @@ import { isDemoAccount } from '@/utils/demoAccount';
 
 export default function App() {
   const { user, loading: authLoading } = useAuth();
+  const { status: streamStatus } = useStreamStatus();
 
   if (authLoading) {
     return (
@@ -35,14 +36,64 @@ export default function App() {
     );
   }
 
+  // Option A: Upfront 20-second initialization screen for all ports
+  if (streamStatus?.isWarmingUp) {
+    const remaining = streamStatus.warmupSecondsRemaining ?? 20;
+    const progressPercent = Math.min(
+      100,
+      Math.max(5, Math.round(((20 - remaining) / 20) * 100))
+    );
+
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-blue-950 flex flex-col justify-center items-center py-12 px-4 sm:px-6 lg:px-8 text-center">
+        <div className="sm:mx-auto sm:w-full sm:max-w-md">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-cyan-500 shadow-xl shadow-blue-500/30 mb-6 animate-pulse">
+            <Activity className="w-9 h-9 text-white animate-spin" />
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+            Berthmark
+          </h1>
+          <p className="text-sm text-cyan-200 mt-1 font-medium">
+            Port-Call Risk Intelligence & Operational Monitoring
+          </p>
+
+          <div className="mt-8 bg-white/10 backdrop-blur-md rounded-2xl border border-white/15 p-6 sm:p-8 shadow-2xl">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-500/20 text-cyan-300 text-xs font-semibold mb-4 border border-blue-400/30">
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              Option A: Warm-Up Telemetry Ingestion
+            </div>
+            <h2 className="text-lg font-bold text-white mb-2">
+              Initializing Live Maritime Telemetry
+            </h2>
+            <p className="text-xs text-slate-300 leading-relaxed mb-6">
+              Streaming live vessel position reports from AISStream.io and real-time atmospheric readings from Open-Meteo across all ports. Please wait while initial baseline conditions populate...
+            </p>
+
+            <div className="w-full bg-slate-700/60 rounded-full h-3 mb-3 overflow-hidden border border-slate-600/50">
+              <div
+                className="bg-gradient-to-r from-blue-500 via-cyan-400 to-teal-400 h-3 rounded-full transition-all duration-1000 ease-linear shadow-sm"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+
+            <div className="flex items-center justify-between text-xs text-slate-400 font-mono">
+              <span>Streaming satellite telemetry</span>
+              <span className="text-cyan-300 font-bold">{remaining}s remaining</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!user) {
     return <LoginScreen />;
   }
 
-  return <Dashboard user={user} />;
+  return <Dashboard user={user} streamStatus={streamStatus} />;
 }
 
-function Dashboard({ user }: { user: User }) {
+function Dashboard({ user, streamStatus }: { user: User; streamStatus?: ReturnType<typeof useStreamStatus>['status'] }) {
   const { logout } = useAuth();
   const {
     ports,
@@ -73,8 +124,6 @@ function Dashboard({ user }: { user: User }) {
     markAllAsRead,
     refresh: refreshNotifications,
   } = useNotifications(user.email);
-
-  const { status: streamStatus } = useStreamStatus();
 
   // Auto-refresh risk assessments when warm-up completes
   useEffect(() => {

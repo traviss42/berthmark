@@ -1,13 +1,16 @@
 """Port management service implementing multi-tenant isolation and database persistence."""
 
+import logging
 import time
 import uuid
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 from fastapi import HTTPException, status
 from app.clients.ports_client import PortDirectoryClient
 from app.db.models import MonitoredPort
 from app.db.session import get_db_context
 from app.models.port import CreatePortRequest, Port
+
+logger = logging.getLogger(__name__)
 
 
 class PortService:
@@ -20,6 +23,7 @@ class PortService:
         self._default_ports: Dict[str, Port] = {}
         for p in self.directory_client.get_default_ports():
             self._default_ports[p.id] = p
+        self._removed_defaults: Dict[str, Set[str]] = {}
 
     def _enrich_with_wpi(self, port: Port) -> Port:
         """Enrich a user-monitored Port with NGA World Port Index hydrographic fields if available in UN/LOCODE DB."""
@@ -48,13 +52,28 @@ class PortService:
     async def get_ports(
         self, user_id: str, vessel_class: Optional[str] = None
     ) -> List[Port]:
-        """Return ports monitored by this user from the database, optionally filtered by vessel class."""
+        """Return global default ports plus custom ports added by the authenticated user."""
+        vc = vessel_class or "neoPanamax"
         with get_db_context() as db:
             query = db.query(MonitoredPort).filter(MonitoredPort.user_id == user_id)
             if vessel_class:
                 query = query.filter(MonitoredPort.vessel_class == vessel_class)
             records = query.order_by(MonitoredPort.created_at.asc()).all()
-            return [self._enrich_with_wpi(r.to_pydantic()) for r in records]
+            user_ports = [self._enrich_with_wpi(r.to_pydantic()) for r in records]
+
+        user_locodes = {p.locode.upper() for p in user_ports}
+        removed_set = self._removed_defaults.get(user_id, set())
+
+        result: List[Port] = []
+        for dp in self._default_ports.values():
+            if dp.id not in removed_set and dp.locode.upper() not in user_locodes:
+                enriched_dp = self._enrich_with_wpi(
+                    dp.model_copy(update={"vesselClass": vc, "notificationsEnabled": True})
+                )
+                result.append(enriched_dp)
+
+        result.extend(user_ports)
+        return result
 
     async def get_default_ports(self) -> List[Port]:
         """Return only default global ports from the UN/LOCODE database."""
@@ -156,16 +175,38 @@ class PortService:
                 .filter(MonitoredPort.id == port_id, MonitoredPort.user_id == user_id)
                 .first()
             )
-            if not db_port:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Port with ID '{port_id}' not found in user's monitored list.",
-                )
+            if db_port:
+                db_port.notifications_enabled = notifications_enabled
+                db.commit()
+                db.refresh(db_port)
+                return self._enrich_with_wpi(db_port.to_pydantic())
 
-            db_port.notifications_enabled = notifications_enabled
-            db.commit()
-            db.refresh(db_port)
-            return db_port.to_pydantic()
+        # If it's a default global port, persist a user-specific preference
+        if port_id in self._default_ports:
+            dp = self._default_ports[port_id]
+            with get_db_context() as db:
+                db_port = MonitoredPort(
+                    id=dp.id,
+                    user_id=user_id,
+                    name=dp.name,
+                    locode=dp.locode,
+                    country=dp.country,
+                    lat=dp.lat,
+                    lon=dp.lon,
+                    is_default=True,
+                    geofence_radius_nm=dp.geofenceRadiusNm or 8.0,
+                    vessel_class="neoPanamax",
+                    notifications_enabled=notifications_enabled,
+                )
+                db.add(db_port)
+                db.commit()
+                db.refresh(db_port)
+                return self._enrich_with_wpi(db_port.to_pydantic())
+
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Port with ID '{port_id}' not found in user's monitored list.",
+        )
 
     async def remove_port(self, port_id: str, user_id: str) -> None:
         """Remove a port from the user's monitored portfolio in the database."""
@@ -175,23 +216,30 @@ class PortService:
                 .filter(MonitoredPort.id == port_id, MonitoredPort.user_id == user_id)
                 .first()
             )
-            if not db_port:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Port with ID '{port_id}' not found in user's monitored list.",
-                )
+            if db_port:
+                locode = db_port.locode
+                db.delete(db_port)
+                db.commit()
 
-            locode = db_port.locode
-            db.delete(db_port)
-            db.commit()
+                try:
+                    from app.clients.ais_stream_manager import get_stream_manager
+                    still_monitored = db.query(MonitoredPort).filter(MonitoredPort.locode == locode).first()
+                    is_default = any(dp.locode.upper() == locode.upper() for dp in self._default_ports.values())
+                    if not still_monitored and not is_default:
+                        get_stream_manager().unregister_port(port_id, locode)
+                except Exception as e:
+                    logger.debug("Stream manager unregister: %s", str(e))
+                return
 
-            try:
-                from app.clients.ais_stream_manager import get_stream_manager
-                still_monitored = db.query(MonitoredPort).filter(MonitoredPort.locode == locode).first()
-                if not still_monitored:
-                    get_stream_manager().unregister_port(port_id, locode)
-            except Exception as e:
-                logger.debug("Stream manager unregister: %s", str(e))
+        # If it is a default port, hide it for this user
+        if port_id in self._default_ports:
+            self._removed_defaults.setdefault(user_id, set()).add(port_id)
+            return
+
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Port with ID '{port_id}' not found in user's monitored list.",
+        )
 
 
 # Singleton instance for the application
