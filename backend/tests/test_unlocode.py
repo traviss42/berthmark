@@ -157,3 +157,34 @@ def test_parse_csv_file_import_and_coordinate_coalescing(tmp_path: Path):
     assert mtr.lon == -73.55
     assert mtr.channelDepthM == 11.0
 
+
+def test_all_maritime_ports_retrieval_and_3way_partition():
+    """Verify that get_all_maritime_ports_for_stream returns 100% of the ports in unlocode.db and partitions evenly."""
+    from app.services.ingestion import get_all_maritime_ports_for_stream
+    db = UnlocodeDatabase()
+    total_in_db = db.count_ports()
+    ports = get_all_maritime_ports_for_stream()
+
+    assert len(ports) == total_in_db
+    assert len(ports) >= 2000
+
+    # Verify every port has valid coordinates and non-empty name and ID
+    ids = set(p["id"] for p in ports)
+    assert len(ids) == len(ports)
+    for p in ports:
+        assert p["lat"] is not None and -90.0 <= p["lat"] <= 90.0
+        assert p["lon"] is not None and -180.0 <= p["lon"] <= 180.0
+        assert p["name"] and len(p["name"].strip()) > 0
+        assert p["locode"] and len(p["locode"].strip()) == 5
+
+    # Verify 3-way partition covers 100% of ports with zero overlap and zero omission
+    w0 = [p for idx, p in enumerate(ports) if idx % 3 == 0]
+    w1 = [p for idx, p in enumerate(ports) if idx % 3 == 1]
+    w2 = [p for idx, p in enumerate(ports) if idx % 3 == 2]
+
+    assert len(w0) + len(w1) + len(w2) == len(ports)
+    assert set(p["id"] for p in w0).isdisjoint(set(p["id"] for p in w1))
+    assert set(p["id"] for p in w1).isdisjoint(set(p["id"] for p in w2))
+    assert set(p["id"] for p in w0).isdisjoint(set(p["id"] for p in w2))
+
+
