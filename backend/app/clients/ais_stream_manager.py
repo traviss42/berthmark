@@ -294,9 +294,10 @@ class AISStreamManager:
                 )
                 async with websockets.connect(
                     self.ws_url,
-                    close_timeout=3.0,
-                    ping_timeout=10.0,
-                    ping_interval=20.0,
+                    close_timeout=10.0,
+                    ping_timeout=30.0,
+                    ping_interval=30.0,
+                    max_size=None,
                 ) as ws:
                     await ws.send(json.dumps(sub_payload))
                     self._worker_connected[worker_id] = True
