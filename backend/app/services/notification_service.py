@@ -1,14 +1,17 @@
 """Notification service managing in-app alerts and risk state transitions with database persistence."""
 
+import logging
 import time
 import uuid
-from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Optional, Tuple
 from fastapi import HTTPException, status
 from app.db.models import MonitoredPort, NotificationRecord
 from app.db.session import get_db_context
 from app.models.common import RiskTier
 from app.models.notification import CreateAlertRequest, Notification
+
+logger = logging.getLogger("berthmark.notifications")
 
 TIER_LABELS: Dict[RiskTier, str] = {
     "low": "Low",
@@ -19,6 +22,73 @@ TIER_LABELS: Dict[RiskTier, str] = {
 
 class NotificationService:
     """Manages user alerts, state-change triggers, and read status backed by SQLAlchemy database."""
+
+    EMAIL_COOLDOWN_SECONDS: float = 1800.0  # 30-minute cooldown between email alerts per user and port
+
+    def __init__(self) -> None:
+        # In-memory tracking of (user_id, port_id) -> timestamp of last outbound email dispatched
+        self._last_email_sent: Dict[Tuple[str, str], float] = {}
+
+    def is_email_cooldown_active(self, user_id: str, port_id: str) -> bool:
+        """Check whether outbound warning emails are within the 30-minute cooldown window for a user and port."""
+        uid = user_id.strip().lower()
+        pid = port_id.strip().lower()
+        now = time.time()
+
+        last_time = self._last_email_sent.get((uid, pid))
+        if last_time is not None:
+            return (now - last_time) < self.EMAIL_COOLDOWN_SECONDS
+
+        # Fallback to database for cold starts or service restarts
+        try:
+            with get_db_context() as db:
+                cutoff = datetime.now(timezone.utc) - timedelta(seconds=self.EMAIL_COOLDOWN_SECONDS)
+                recent = (
+                    db.query(NotificationRecord)
+                    .filter(
+                        NotificationRecord.user_id == user_id,
+                        NotificationRecord.port_id == port_id,
+                        NotificationRecord.email_dispatched.is_(True),
+                        NotificationRecord.created_at >= cutoff,
+                    )
+                    .order_by(NotificationRecord.created_at.desc())
+                    .first()
+                )
+                if recent and recent.created_at:
+                    ts = (
+                        recent.created_at.timestamp()
+                        if recent.created_at.tzinfo
+                        else recent.created_at.replace(tzinfo=timezone.utc).timestamp()
+                    )
+                    self._last_email_sent[(uid, pid)] = ts
+                    return (now - ts) < self.EMAIL_COOLDOWN_SECONDS
+        except Exception:
+            pass
+
+        return False
+
+    def record_email_sent(
+        self, user_id: str, port_id: str, timestamp: Optional[float] = None
+    ) -> None:
+        """Record that an email was dispatched for (user_id, port_id) to start or reset the 30-minute cooldown."""
+        uid = user_id.strip().lower()
+        pid = port_id.strip().lower()
+        ts = timestamp if timestamp is not None else time.time()
+        self._last_email_sent[(uid, pid)] = ts
+
+    def clear_cooldown(
+        self, user_id: Optional[str] = None, port_id: Optional[str] = None
+    ) -> None:
+        """Clear email cooldown records (useful for testing and administrative resets)."""
+        if user_id is not None and port_id is not None:
+            self._last_email_sent.pop((user_id.strip().lower(), port_id.strip().lower()), None)
+        elif user_id is not None:
+            uid = user_id.strip().lower()
+            keys_to_del = [k for k in self._last_email_sent if k[0] == uid]
+            for k in keys_to_del:
+                del self._last_email_sent[k]
+        else:
+            self._last_email_sent.clear()
 
     async def get_notifications(
         self, user_id: str, unread_only: bool = False
@@ -90,16 +160,18 @@ class NotificationService:
         # Check if user has opted out of notifications for this port in the database
         port_notifications_enabled = True
         vessel_label: Optional[str] = None
+        monitored_port_id: Optional[str] = None
         with get_db_context() as db:
             monitored_port = (
                 db.query(MonitoredPort)
                 .filter(
-                    MonitoredPort.id == alert_req.portId,
+                    (MonitoredPort.id == alert_req.portId) | (MonitoredPort.locode == alert_req.portId.upper()),
                     MonitoredPort.user_id == user_id,
                 )
                 .first()
             )
             if monitored_port:
+                monitored_port_id = monitored_port.id
                 if not monitored_port.notifications_enabled:
                     port_notifications_enabled = False
                 if monitored_port.vessel_class:
@@ -118,6 +190,41 @@ class NotificationService:
             if port_notifications_enabled:
                 recipient_email = user_id if "@" in user_id else f"{user_id}@berthmark.com"
 
+            # Check outbound email suppression:
+            # 1. AISStream initial warm-up suppression (stream data ramping up from cold start)
+            # 2. 30-minute cooldown suppression per user and port
+            should_dispatch_email = False
+            effective_port_id = monitored_port_id or alert_req.portId
+
+            if recipient_email:
+                is_warmup = False
+                try:
+                    from app.clients.ais_stream_manager import get_stream_manager
+                    stream_mgr = get_stream_manager()
+                    if stream_mgr and stream_mgr.is_warming_up:
+                        is_warmup = True
+                except Exception:
+                    pass
+
+                in_cooldown = self.is_email_cooldown_active(user_id, effective_port_id)
+                if not in_cooldown and alert_req.portId != effective_port_id:
+                    in_cooldown = self.is_email_cooldown_active(user_id, alert_req.portId)
+
+                if is_warmup:
+                    logger.info(
+                        "Warning email suppressed for %s on %s: AISStream warm-up active",
+                        recipient_email,
+                        effective_port_id,
+                    )
+                elif in_cooldown:
+                    logger.info(
+                        "Warning email suppressed for %s on %s: 30-minute cooldown active",
+                        recipient_email,
+                        effective_port_id,
+                    )
+                else:
+                    should_dispatch_email = True
+
             record = NotificationRecord(
                 id=notif_id,
                 user_id=user_id,
@@ -131,14 +238,15 @@ class NotificationService:
                 timestamp=now_str,
                 read=False,
                 recipient_email=recipient_email,
+                email_dispatched=should_dispatch_email,
             )
             db.add(record)
             db.commit()
             db.refresh(record)
             notification = record.to_pydantic()
 
-        # Dispatch email if recipient is enabled
-        if recipient_email:
+        # Dispatch email if eligible
+        if should_dispatch_email and recipient_email:
             try:
                 from app.services.email_service import email_service
                 vessel_line = f"Vessel Class: {vessel_label}\n" if vessel_label else ""
@@ -159,8 +267,11 @@ class NotificationService:
                     subject=f"[Berthmark Alert] {alert_req.portName}{subject_vessel}: Risk shifted to {new_label}",
                     plain_text=email_body,
                 )
-            except Exception:
-                pass
+                self.record_email_sent(user_id, effective_port_id)
+                if alert_req.portId != effective_port_id:
+                    self.record_email_sent(user_id, alert_req.portId)
+            except Exception as e:
+                logger.warning("Failed to dispatch alert email to %s: %s", recipient_email, e)
 
         return notification
 
@@ -226,6 +337,7 @@ class NotificationService:
                 timestamp=now_str,
                 read=False,
                 recipient_email=recipient_email,
+                email_dispatched=True,
             )
             db.add(record)
             db.commit()
@@ -255,8 +367,12 @@ class NotificationService:
                 subject=f"[Berthmark Alert] Subscribed to {port.name} [{vessel_label}] (Baseline Risk: {tier_label})",
                 plain_text=email_body,
             )
-        except Exception:
-            pass
+            # Record that an outbound email was dispatched, starting the 30-minute cooldown
+            self.record_email_sent(user_id, port.id)
+            if hasattr(port, "locode") and port.locode:
+                self.record_email_sent(user_id, port.locode)
+        except Exception as e:
+            logger.warning("Failed to dispatch subscription baseline email to %s: %s", recipient_email, e)
 
         return notification
 

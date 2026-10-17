@@ -247,4 +247,152 @@ async def test_demo_account_suppresses_smtp_delivery_and_prevents_bounces(monkey
     assert smtp_attempts[0] == ("smtp.mock-mail.com", 587)
 
 
+def test_subscription_baseline_email_initiates_30_minute_cooldown(client: TestClient):
+    """Subscription sends baseline email immediately, but suppresses subsequent warning emails for 30 minutes."""
+    import time
+    from app.services.email_service import email_service
+    from app.services.notification_service import notification_service
+
+    email_service._sent_emails.clear()
+    user_headers = {"Authorization": "Bearer fleet-ops@shippingcorp.com"}
+
+    # 1. User subscribes to a port
+    add_resp = client.post(
+        "/api/v1/ports",
+        json={
+            "name": "Port of Antwerp",
+            "locode": "BEANR",
+            "country": "Belgium",
+            "lat": 51.26,
+            "lon": 4.38,
+            "geofenceRadiusNm": 8.0,
+        },
+        headers=user_headers,
+    )
+    assert add_resp.status_code == 201
+    port_id = add_resp.json()["id"]
+
+    # Verify baseline welcome email was dispatched immediately
+    user_emails = [e for e in email_service._sent_emails if e["to"] == "fleet-ops@shippingcorp.com"]
+    assert len(user_emails) == 1
+    assert "Subscribed to Port of Antwerp" in user_emails[0]["subject"]
+
+    # 2. Trigger a state-change alert shortly after subscription (within 30-minute window)
+    alert_1 = {
+        "portId": port_id,
+        "portName": "Port of Antwerp",
+        "newTier": "high",
+        "previousTier": "low",
+    }
+    resp_alert_1 = client.post("/api/v1/notifications/alerts", json=alert_1, headers=user_headers)
+    assert resp_alert_1.status_code == 201
+    notif_1 = resp_alert_1.json()
+    assert notif_1["tier"] == "high"
+    # In-app notification was created, but email dispatch was throttled
+    assert notif_1["emailDispatched"] is False
+
+    # Outbound email list should still only contain the 1 baseline email
+    user_emails_after_alert_1 = [
+        e for e in email_service._sent_emails if e["to"] == "fleet-ops@shippingcorp.com"
+    ]
+    assert len(user_emails_after_alert_1) == 1
+
+    # 3. Simulate passage of 30 minutes (advance cooldown timestamp by 1801 seconds)
+    notification_service._last_email_sent[("fleet-ops@shippingcorp.com", port_id.lower())] = (
+        time.time() - 1801.0
+    )
+    notification_service._last_email_sent[("fleet-ops@shippingcorp.com", "beanr")] = (
+        time.time() - 1801.0
+    )
+
+    # Trigger second alert -> Cooldown has expired, so email MUST be dispatched
+    alert_2 = {
+        "portId": port_id,
+        "portName": "Port of Antwerp",
+        "newTier": "medium",
+        "previousTier": "high",
+    }
+    resp_alert_2 = client.post("/api/v1/notifications/alerts", json=alert_2, headers=user_headers)
+    assert resp_alert_2.status_code == 201
+    notif_2 = resp_alert_2.json()
+    assert notif_2["emailDispatched"] is True
+
+    # Outbound email list should now contain 2 emails
+    user_emails_after_alert_2 = [
+        e for e in email_service._sent_emails if e["to"] == "fleet-ops@shippingcorp.com"
+    ]
+    assert len(user_emails_after_alert_2) == 2
+    assert "Risk shifted to Medium" in user_emails_after_alert_2[1]["subject"]
+
+    # 4. Immediate subsequent alert is again throttled under the newly reset 30-minute cooldown
+    alert_3 = {
+        "portId": port_id,
+        "portName": "Port of Antwerp",
+        "newTier": "high",
+        "previousTier": "medium",
+    }
+    resp_alert_3 = client.post("/api/v1/notifications/alerts", json=alert_3, headers=user_headers)
+    assert resp_alert_3.status_code == 201
+    notif_3 = resp_alert_3.json()
+    assert notif_3["emailDispatched"] is False
+
+    user_emails_after_alert_3 = [
+        e for e in email_service._sent_emails if e["to"] == "fleet-ops@shippingcorp.com"
+    ]
+    assert len(user_emails_after_alert_3) == 2
+
+
+def test_stream_warmup_suppresses_warning_emails(client: TestClient):
+    """Warning emails are suppressed during stream warm-up initialization to prevent noisy cold-start alarms."""
+    import time
+    from app.clients.ais_stream_manager import get_stream_manager
+    from app.services.email_service import email_service
+    from app.services.notification_service import notification_service
+
+    email_service._sent_emails.clear()
+    notification_service.clear_cooldown()
+
+    headers = {"Authorization": "Bearer harbor-ops@ports.org"}
+    stream_mgr = get_stream_manager()
+
+    # Simulate active warm-up state
+    stream_mgr._is_warming_up = True
+    stream_mgr._warmup_start_time = time.time()
+    stream_mgr._warmup_duration_sec = 20.0
+    assert stream_mgr.is_warming_up is True
+
+    # Trigger alert during warm-up
+    alert = {
+        "portId": "port-warmup-test",
+        "portName": "Warmup Harbor",
+        "newTier": "high",
+        "previousTier": "low",
+    }
+    resp = client.post("/api/v1/notifications/alerts", json=alert, headers=headers)
+    assert resp.status_code == 201
+    notif = resp.json()
+    assert notif["emailDispatched"] is False
+
+    # Outbound email was suppressed
+    matching_emails = [e for e in email_service._sent_emails if e["to"] == "harbor-ops@ports.org"]
+    assert len(matching_emails) == 0
+
+    # End warm-up
+    stream_mgr._is_warming_up = False
+    assert stream_mgr.is_warming_up is False
+
+    # Trigger alert after warm-up finishes
+    resp_after = client.post("/api/v1/notifications/alerts", json=alert, headers=headers)
+    assert resp_after.status_code == 201
+    notif_after = resp_after.json()
+    assert notif_after["emailDispatched"] is True
+
+    matching_emails_after = [
+        e for e in email_service._sent_emails if e["to"] == "harbor-ops@ports.org"
+    ]
+    assert len(matching_emails_after) == 1
+    assert "Risk shifted to High" in matching_emails_after[0]["subject"]
+
+
+
 

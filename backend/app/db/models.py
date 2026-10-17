@@ -70,6 +70,7 @@ class NotificationRecord(Base):
     timestamp: Mapped[str] = mapped_column(String(50), nullable=False)
     read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     recipient_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    email_dispatched: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -94,4 +95,5 @@ class NotificationRecord(Base):
             timestamp=self.timestamp,
             read=self.read,
             recipientEmail=self.recipient_email,
+            emailDispatched=self.email_dispatched,
         )

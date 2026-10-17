@@ -23,6 +23,10 @@ class Notification(BaseModel):
         description="Login email address where notification alert was dispatched",
         examples=["operations@maritime.com"],
     )
+    emailDispatched: bool = Field(
+        default=False,
+        description="Whether outbound email notification was dispatched (suppressed during 30m cooldown or stream warm-up)",
+    )
 
 
 class CreateAlertRequest(BaseModel):

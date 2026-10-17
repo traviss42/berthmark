@@ -97,6 +97,12 @@ def init_db(target_engine: Optional[Engine] = None) -> None:
                 conn.execute(text("ALTER TABLE monitored_ports_new RENAME TO monitored_ports"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_monitored_ports_user_id ON monitored_ports (user_id)"))
 
+    if "notifications" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("notifications")]
+        if "email_dispatched" not in columns:
+            with eng.begin() as conn:
+                conn.execute(text("ALTER TABLE notifications ADD COLUMN email_dispatched BOOLEAN NOT NULL DEFAULT 0"))
+
     Base.metadata.create_all(bind=eng)
 
 

@@ -138,6 +138,7 @@ export interface Notification {
   timestamp: string;
   read: boolean;
   recipientEmail?: string | null;
+  emailDispatched?: boolean;
 }
 
 export interface User {
