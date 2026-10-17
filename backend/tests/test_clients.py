@@ -291,3 +291,183 @@ async def test_ais_client_sqlite_cache_hit_and_persistence(monkeypatch):
     assert congestion.activeVesselCount == 45
     assert navigational.channelDepthM == 16.5
 
+
+@pytest.mark.asyncio
+async def test_ais_client_calculate_bounding_box():
+    """Verify calculate_bounding_box creates valid AISStream-compatible coordinates."""
+    bbox = AISClient.calculate_bounding_box(lat=51.92, lon=4.48, radius_nm=8.0)
+    assert len(bbox) == 2
+    sw, ne = bbox[0], bbox[1]
+    assert sw[0] < ne[0]  # min_lat < max_lat
+    assert sw[1] < ne[1]  # min_lon < max_lon
+    assert sw[0] < 51.92 < ne[0]
+    assert sw[1] < 4.48 < ne[1]
+
+
+@pytest.mark.asyncio
+async def test_ais_client_query_multiple_bounding_boxes_ws(monkeypatch):
+    """Verify _query_multiple_bounding_boxes_ws subscribes with multiple boxes and routes vessels correctly."""
+    import asyncio
+    import json
+    import websockets
+
+    sent_subscriptions = []
+
+    mock_messages = [
+        # Subscription confirmation (should be skipped)
+        json.dumps({"MessageType": "SubscriptionConfirmation"}),
+        # Vessel 1 in Rotterdam (stationary: Sog=0.1)
+        json.dumps({
+            "MessageType": "PositionReport",
+            "MetaData": {
+                "MMSI": 111111111,
+                "latitude": 51.92,
+                "longitude": 4.48,
+            },
+            "Message": {
+                "PositionReport": {
+                    "Latitude": 51.92,
+                    "Longitude": 4.48,
+                    "Sog": 0.1,
+                    "NavigationalStatus": 1,
+                }
+            },
+        }),
+        # Vessel 2 in Rotterdam (moving: Sog=12.5)
+        json.dumps({
+            "MessageType": "PositionReport",
+            "MetaData": {
+                "MMSI": 222222222,
+                "latitude": 51.91,
+                "longitude": 4.49,
+            },
+            "Message": {
+                "PositionReport": {
+                    "Latitude": 51.91,
+                    "Longitude": 4.49,
+                    "Sog": 12.5,
+                    "NavigationalStatus": 0,
+                }
+            },
+        }),
+        # Vessel 3 in Keppel / Singapore (moving: Sog=15.0)
+        json.dumps({
+            "MessageType": "PositionReport",
+            "MetaData": {
+                "MMSI": 333333333,
+                "latitude": 1.266,
+                "longitude": 103.833,
+            },
+            "Message": {
+                "PositionReport": {
+                    "Latitude": 1.266,
+                    "Longitude": 103.833,
+                    "Sog": 15.0,
+                    "NavigationalStatus": 0,
+                }
+            },
+        }),
+    ]
+
+    class MockWebSocket:
+        def __init__(self):
+            self.msg_queue = list(mock_messages)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def send(self, data):
+            sent_subscriptions.append(json.loads(data))
+
+        async def recv(self):
+            if self.msg_queue:
+                return self.msg_queue.pop(0)
+            raise asyncio.TimeoutError()
+
+    def mock_connect(*args, **kwargs):
+        return MockWebSocket()
+
+    monkeypatch.setattr(websockets, "connect", mock_connect)
+
+    client = AISClient(api_key="mock-api-key")
+    boxes = {
+        "port-nlrtm": {"lat": 51.9167, "lon": 4.4, "radius_nm": 8.0},
+        "port-sgkep": {"lat": 1.2667, "lon": 103.8333, "radius_nm": 8.0},
+    }
+
+    results = await client._query_multiple_bounding_boxes_ws(boxes, sample_seconds=0.5)
+
+    # 1. Verify a single WebSocket subscription was sent with both bounding boxes
+    assert len(sent_subscriptions) == 1
+    sub = sent_subscriptions[0]
+    assert sub["APIKey"] == "mock-api-key"
+    assert len(sub["BoundingBoxes"]) == 2
+    assert "FilterMessageTypes" in sub
+
+    # 2. Verify results per port:
+    # Rotterdam has 2 vessels: 1 stationary, 1 moving
+    assert "port-nlrtm" in results
+    rtm_active, rtm_stationary, rtm_moving = results["port-nlrtm"]
+    assert rtm_active == 2
+    assert rtm_stationary == 1
+    assert rtm_moving == 1
+
+    # Keppel has 1 vessel: 0 stationary, 1 moving
+    assert "port-sgkep" in results
+    kep_active, kep_stationary, kep_moving = results["port-sgkep"]
+    assert kep_active == 1
+    assert kep_stationary == 0
+    assert kep_moving == 1
+
+    # 3. Verify in-memory coordinate cache is primed for both ports
+    coord_rtm = (round(51.9167, 2), round(4.4, 2))
+    coord_kep = (round(1.2667, 2), round(103.8333, 2))
+    assert coord_rtm in client._live_vessel_cache
+    assert coord_kep in client._live_vessel_cache
+
+
+@pytest.mark.asyncio
+async def test_batch_query_ports_ws_with_aliasing(monkeypatch):
+    """Verify batch_query_ports_ws resolves ports and provides both port_id and locode keys."""
+    client = AISClient(api_key="mock-key")
+
+    async def mock_multi_ws(boxes_by_port, sample_seconds=2.0):
+        return {
+            "port-nlrtm": (25, 10, 15),
+            "port-sgkep": (30, 8, 22),
+        }
+
+    monkeypatch.setattr(client, "_query_multiple_bounding_boxes_ws", mock_multi_ws)
+
+    ports = [
+        {"id": "port-nlrtm", "locode": "NLRTM", "lat": 51.9167, "lon": 4.4},
+        {"id": "port-sgkep", "locode": "SGKEP", "lat": 1.2667, "lon": 103.8333},
+    ]
+
+    res = await client.batch_query_ports_ws(ports)
+    # Available by id
+    assert res["port-nlrtm"] == (25, 10, 15)
+    assert res["port-sgkep"] == (30, 8, 22)
+    # Available by locode alias
+    assert res["NLRTM"] == (25, 10, 15)
+    assert res["SGKEP"] == (30, 8, 22)
+
+
+@pytest.mark.asyncio
+async def test_query_aisstream_ws_single_wrapper(monkeypatch):
+    """Verify _query_aisstream_ws wraps _query_multiple_bounding_boxes_ws for backward compatibility."""
+    client = AISClient(api_key="mock-key")
+
+    async def mock_multi_ws(boxes_by_port, sample_seconds=1.5):
+        assert "default" in boxes_by_port
+        return {"default": (12, 4, 8)}
+
+    monkeypatch.setattr(client, "_query_multiple_bounding_boxes_ws", mock_multi_ws)
+
+    counts = await client._query_aisstream_ws(lat=51.92, lon=4.48, radius_nm=8.0)
+    assert counts == (12, 4, 8)
+
+

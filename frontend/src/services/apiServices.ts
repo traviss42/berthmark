@@ -93,8 +93,11 @@ export class ApiPortService implements IPortService {
 
   constructor(private baseUrl?: string) {}
 
-  async getPorts(userId: string): Promise<Port[]> {
-    return request<Port[]>('/api/v1/ports', { method: 'GET' }, this.baseUrl, userId);
+  async getPorts(userId: string, vesselClass?: VesselClass): Promise<Port[]> {
+    const path = vesselClass
+      ? `/api/v1/ports?vesselClass=${encodeURIComponent(vesselClass)}`
+      : '/api/v1/ports';
+    return request<Port[]>(path, { method: 'GET' }, this.baseUrl, userId);
   }
 
   async getDefaultPorts(): Promise<Port[]> {
@@ -187,14 +190,18 @@ export class ApiRiskService implements IRiskService {
   }
 
   async getBulkRiskAssessments(
-    ports: { id: string; name: string }[],
+    ports: { id: string; name: string; vesselClass?: VesselClass }[],
     vesselClass: VesselClass,
     forceRefresh: boolean = false
   ): Promise<RiskAssessment[]> {
     if (ports.length === 0) {
       return [];
     }
-    const body: { ports: { id: string; name: string }[]; vesselClass: VesselClass; forceRefresh?: boolean } = {
+    const body: {
+      ports: { id: string; name: string; vesselClass?: VesselClass }[];
+      vesselClass: VesselClass;
+      forceRefresh?: boolean;
+    } = {
       ports,
       vesselClass,
     };

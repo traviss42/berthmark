@@ -9,7 +9,8 @@ import {
   Mail,
   User as UserIcon,
 } from 'lucide-react';
-import type { VesselClass, User } from '@/types';
+import type { VesselClass, User, Port } from '@/types';
+import { getVesselClassInfo } from '@/data/vesselTaxonomy';
 import { usePorts, useRiskAssessments, useNotifications } from '@/hooks/useServices';
 import { useAuth } from '@/context/AuthContext';
 import { LoginScreen } from '@/components/LoginScreen';
@@ -119,13 +120,18 @@ function Dashboard({ user }: { user: User }) {
     }
   }, [refreshRisk, selectedPort]);
 
+  const activeVesselInfo = useMemo(() => getVesselClassInfo(vesselClass), [vesselClass]);
+
   const handleAddPort = useCallback(
     async (port: Omit<Port, 'id' | 'isDefault' | 'addedByUserId'>) => {
-      const created = await addPort(port);
+      const created = await addPort({
+        ...port,
+        vesselClass,
+      });
       await refreshNotifications();
       return created;
     },
-    [addPort, refreshNotifications]
+    [addPort, refreshNotifications, vesselClass]
   );
 
   const handleRemovePort = useCallback(
@@ -140,7 +146,13 @@ function Dashboard({ user }: { user: User }) {
     [removePort, selectedPortId]
   );
 
-  const existingLocodes = useMemo(() => ports.map((p) => p.locode), [ports]);
+  const existingLocodesForActiveVessel = useMemo(
+    () =>
+      ports
+        .filter((p) => (p.vesselClass || 'neoPanamax') === vesselClass)
+        .map((p) => p.locode),
+    [ports, vesselClass]
+  );
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -266,6 +278,17 @@ function Dashboard({ user }: { user: User }) {
           </div>
         )}
 
+        {/* Live Vessel Ingestion Progress Banner */}
+        {refreshing && (
+          <div className="mb-6 rounded-xl bg-blue-50/90 border border-blue-200 p-4 flex items-center gap-3 text-blue-900 shadow-sm animate-pulse">
+            <RefreshCw className="w-5 h-5 text-blue-600 animate-spin flex-shrink-0" />
+            <div className="text-sm">
+              <span className="font-semibold">Loading live vessel data...</span>
+              <span className="ml-1.5 text-blue-700">Connecting to AISStream WebSocket telemetry across 20-second sampling window.</span>
+            </div>
+          </div>
+        )}
+
         {(portsError || riskError) && (
           <div className="mb-6 rounded-lg bg-red-50 border border-red-200 p-4 flex items-start justify-between">
             <div className="flex items-start gap-3">
@@ -335,7 +358,11 @@ function Dashboard({ user }: { user: User }) {
             {/* Controls Bar */}
             <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
               <div className="flex-1 w-full max-w-md">
-                <PortSearch onAddPort={handleAddPort} existingLocodes={existingLocodes} />
+                <PortSearch
+                  onAddPort={handleAddPort}
+                  existingLocodes={existingLocodesForActiveVessel}
+                  vesselClassLabel={activeVesselInfo.label}
+                />
               </div>
               <div className="flex items-center gap-2">
                 <VesselClassSelector value={vesselClass} onChange={setVesselClass} />
@@ -356,13 +383,14 @@ function Dashboard({ user }: { user: User }) {
                 <h2 className="text-sm font-semibold text-slate-700">
                   Monitored Ports Portfolio
                   <span className="ml-2 text-xs font-normal text-slate-400">
-                    Risk evaluated for {vesselClass.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase())} class
+                    Clustered by vessel class · Focusing on {activeVesselInfo.label}
                   </span>
                 </h2>
               </div>
               <PortList
                 ports={ports}
                 assessments={assessmentMap}
+                activeVesselClass={vesselClass}
                 onSelectPort={handleSelectPort}
                 onRemovePort={(id) => handleRemovePort(id)}
                 onToggleNotifications={toggleNotifications}

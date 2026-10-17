@@ -11,7 +11,7 @@ import type {
 // All backend calls go through these interfaces.
 
 export interface IPortService {
-  getPorts(userId: string): Promise<Port[]>;
+  getPorts(userId: string, vesselClass?: VesselClass): Promise<Port[]>;
   getDefaultPorts(): Promise<Port[]>;
   searchPorts(query: string): Promise<Port[]>;
   addPort(port: Omit<Port, 'id' | 'isDefault' | 'addedByUserId'>, userId: string): Promise<Port>;
@@ -27,7 +27,7 @@ export interface IRiskService {
     forceRefresh?: boolean
   ): Promise<RiskAssessment>;
   getBulkRiskAssessments(
-    ports: { id: string; name: string }[],
+    ports: { id: string; name: string; vesselClass?: VesselClass }[],
     vesselClass: VesselClass,
     forceRefresh?: boolean
   ): Promise<RiskAssessment[]>;

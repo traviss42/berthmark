@@ -25,6 +25,7 @@ class MonitoredPort(Base):
     is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     geofence_radius_nm: Mapped[float] = mapped_column(Float, default=8.0, nullable=False)
     notifications_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    vessel_class: Mapped[str] = mapped_column(String(50), default="neoPanamax", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -32,7 +33,7 @@ class MonitoredPort(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("user_id", "locode", name="uq_user_port_locode"),
+        UniqueConstraint("user_id", "locode", "vessel_class", name="uq_user_port_locode_vessel"),
     )
 
     def to_pydantic(self) -> Port:
@@ -47,6 +48,7 @@ class MonitoredPort(Base):
             isDefault=self.is_default,
             geofenceRadiusNm=self.geofence_radius_nm,
             addedByUserId=self.user_id,
+            vesselClass=self.vessel_class or "neoPanamax",  # type: ignore
             notificationsEnabled=self.notifications_enabled,
         )
 

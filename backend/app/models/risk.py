@@ -1,6 +1,4 @@
-"""Risk assessment, metric structures, and calculation models."""
-
-from typing import Dict, List
+from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 from app.models.common import RiskTier, SubRiskCategory, VesselClass
 
@@ -23,8 +21,8 @@ class WeatherMetrics(BaseModel):
 class NavigationalMetrics(BaseModel):
     underKeelClearanceM: float = Field(..., description="Derived depth margin: WPI controlling depth minus vessel class design draft (m)", examples=[2.1])
     channelDepthM: float = Field(..., description="Channel depth in meters from NGA World Port Index (Pub 150)", examples=[16.5])
-    cargoPierDepthM: float = Field(default=0.0, description="Cargo pier / terminal depth in meters from NGA World Port Index (Pub 150)", examples=[14.0])
-    anchorageDepthM: float = Field(default=0.0, description="Anchorage depth in meters from NGA World Port Index (Pub 150)", examples=[15.5])
+    cargoPierDepthM: Optional[float] = Field(default=None, description="Cargo pier / terminal depth in meters from NGA World Port Index (Pub 150)", examples=[14.0])
+    anchorageDepthM: Optional[float] = Field(default=None, description="Anchorage depth in meters from NGA World Port Index (Pub 150)", examples=[15.5])
     vesselDraftM: float = Field(default=12.0, description="Selected vessel class design draft in meters", examples=[12.0])
     overheadLimits: str = Field(default="Unknown", description="Overhead bridge/cable limits (Yes / No / Unknown) from NGA World Port Index", examples=["Yes"])
     pilotageAvailable: bool = Field(..., description="Harbor pilot availability from NGA World Port Index", examples=[True])
@@ -67,6 +65,11 @@ class RiskAssessment(BaseModel):
 class PortRef(BaseModel):
     id: str = Field(..., examples=["port-rotterdam"])
     name: str = Field(..., examples=["Port of Rotterdam"])
+    vesselClass: Optional[VesselClass] = Field(
+        default=None,
+        description="Optional vessel class override for this specific port",
+        examples=["neoPanamax"],
+    )
 
 
 class BulkRiskAssessmentRequest(BaseModel):

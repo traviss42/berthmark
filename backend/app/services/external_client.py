@@ -43,7 +43,16 @@ async def get_port_traffic_metrics(
     )
 
 
+async def batch_query_ports_ais(
+    ports: list,
+    sample_seconds: float = 2.0,
+):
+    """Batch query AIS traffic across multiple ports concurrently in a single WebSocket connection."""
+    return await ais_client.batch_query_ports_ws(ports, sample_seconds=sample_seconds)
+
+
 # Aliases for convenience
 fetch_marine_weather = get_marine_weather
 fetch_ais_traffic = get_port_traffic_metrics
+batch_fetch_ais_traffic = batch_query_ports_ais
 

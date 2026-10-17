@@ -199,3 +199,50 @@ def test_search_japan_and_canadian_ports(client: TestClient, auth_headers: dict)
     assert risk_data["metrics"]["navigational"]["channelDepthM"] == 15.5
 
 
+def test_multiple_vessel_class_subscriptions_for_same_port(client: TestClient, auth_headers: dict):
+    """A user can monitor the same port under different vessel classes, but not duplicate the same (locode, vesselClass)."""
+    payload_neo = {
+        "name": "Port of Rotterdam",
+        "locode": "NLRTM",
+        "country": "Netherlands",
+        "lat": 51.9,
+        "lon": 4.4,
+        "vesselClass": "neoPanamax",
+    }
+    payload_vlcc = {
+        "name": "Port of Rotterdam",
+        "locode": "NLRTM",
+        "country": "Netherlands",
+        "lat": 51.9,
+        "lon": 4.4,
+        "vesselClass": "vlcc",
+    }
+
+    # 1. Subscribe to Rotterdam for neoPanamax
+    res1 = client.post("/api/v1/ports", json=payload_neo, headers=auth_headers)
+    assert res1.status_code == 201
+    port1 = res1.json()
+    assert port1["locode"] == "NLRTM"
+    assert port1["vesselClass"] == "neoPanamax"
+
+    # 2. Subscribe to Rotterdam for vlcc (should succeed!)
+    res2 = client.post("/api/v1/ports", json=payload_vlcc, headers=auth_headers)
+    assert res2.status_code == 201
+    port2 = res2.json()
+    assert port2["locode"] == "NLRTM"
+    assert port2["vesselClass"] == "vlcc"
+    assert port1["id"] != port2["id"]
+
+    # 3. Duplicate subscription for vlcc should fail with 409
+    res3 = client.post("/api/v1/ports", json=payload_vlcc, headers=auth_headers)
+    assert res3.status_code == 409
+
+    # 4. Filter by vesselClass
+    list_vlcc = client.get("/api/v1/ports?vesselClass=vlcc", headers=auth_headers)
+    assert list_vlcc.status_code == 200
+    vlcc_ports = list_vlcc.json()
+    assert any(p["id"] == port2["id"] for p in vlcc_ports)
+    assert not any(p["id"] == port1["id"] for p in vlcc_ports)
+
+
+

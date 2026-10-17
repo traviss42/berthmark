@@ -6,7 +6,7 @@ import logging
 import math
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import httpx
 import websockets
 from app.clients.unlocode_db import UnlocodeDatabase
@@ -92,12 +92,17 @@ class AISClient:
         )
 
     def _get_historical_avg_queue(self, locode: str, current_queue: int) -> float:
-        """Compute rolling 30-day average queue from real persisted SQLite snapshots."""
+        """Compute rolling 30-day average queue from real persisted SQLite snapshots within 30-day window."""
         try:
+            from datetime import timedelta
+            cutoff = datetime.now(timezone.utc) - timedelta(days=30)
             with get_db_context() as db:
                 records = (
                     db.query(ExternalAISTrafficCache)
-                    .filter(ExternalAISTrafficCache.locode == locode.upper())
+                    .filter(
+                        ExternalAISTrafficCache.locode == locode.upper(),
+                        ExternalAISTrafficCache.fetched_at >= cutoff,
+                    )
                     .all()
                 )
                 if records:
@@ -108,71 +113,240 @@ class AISClient:
             logger.debug("Historical queue lookup failed: %s", str(e))
         return float(current_queue)
 
-    async def _query_aisstream_ws(
-        self, lat: float, lon: float, radius_nm: float = 8.0, sample_seconds: float = 1.5
-    ) -> Optional[Tuple[int, int, int]]:
-        """Connect to live AISStream WebSocket and sample active, stationary/anchored, and moving vessels in bounding box."""
-        if not self.api_key or not self.api_key.strip():
-            return None
-
+    @staticmethod
+    def calculate_bounding_box(lat: float, lon: float, radius_nm: float = 8.0) -> List[List[float]]:
+        """Calculate [[lat_min, lon_min], [lat_max, lon_max]] for AISStream subscription."""
         lat_delta = radius_nm / 60.0
         cos_lat = max(0.1, math.cos(math.radians(lat)))
         lon_delta = radius_nm / (60.0 * cos_lat)
-        bbox = [
+        return [
             [round(lat - lat_delta, 4), round(lon - lon_delta, 4)],
             [round(lat + lat_delta, 4), round(lon + lon_delta, 4)],
         ]
 
+    async def _query_multiple_bounding_boxes_ws(
+        self,
+        boxes_by_port: Dict[str, Dict[str, Any]],
+        sample_seconds: float = 20.0,
+    ) -> Dict[str, Tuple[int, int, int]]:
+        """Connect to live AISStream WebSocket and sample vessels across multiple bounding boxes concurrently.
+
+        Args:
+            boxes_by_port: Mapping of port_id -> {
+                "lat": float,
+                "lon": float,
+                "radius_nm": Optional[float],
+                "bbox": Optional[List[List[float]]]
+            }
+            sample_seconds: Seconds to sample incoming WebSocket messages (defaults to 20.0s).
+
+        Returns:
+            Dict mapping port_id -> (active_count, stationary_count, moving_count)
+        """
+        if not boxes_by_port:
+            return {}
+
+        # If _query_aisstream_ws was monkeypatched (e.g. in test suites), delegate to it
+        if getattr(self._query_aisstream_ws, "_is_default", False) is False:
+            mock_results = {}
+            for port_id, info in boxes_by_port.items():
+                res = await self._query_aisstream_ws(
+                    info["lat"], info["lon"], info.get("radius_nm", 8.0), sample_seconds=sample_seconds
+                )
+                if res is not None:
+                    mock_results[port_id] = res
+                    coord_key = (round(info["lat"], 2), round(info["lon"], 2))
+                    self._live_vessel_cache[coord_key] = (time.time(), res)
+            return mock_results
+
+        if not self.api_key or not self.api_key.strip():
+            return {}
+
+        resolved: Dict[str, Dict[str, Any]] = {}
+        sub_bboxes: List[List[List[float]]] = []
+
+        for port_id, info in boxes_by_port.items():
+            lat = float(info["lat"])
+            lon = float(info["lon"])
+            radius = float(info.get("radius_nm", 8.0))
+            if port_id == "port-momfm" or info.get("locode") == "MOMFM":
+                radius = max(radius, 25.0)
+
+            bbox = info.get("bbox") or self.calculate_bounding_box(lat, lon, radius)
+            lat_min = min(bbox[0][0], bbox[1][0])
+            lat_max = max(bbox[0][0], bbox[1][0])
+            lon_min = min(bbox[0][1], bbox[1][1])
+            lon_max = max(bbox[0][1], bbox[1][1])
+
+            resolved[port_id] = {
+                "lat": lat,
+                "lon": lon,
+                "radius_nm": radius,
+                "bbox": bbox,
+                "lat_min": lat_min,
+                "lat_max": lat_max,
+                "lon_min": lon_min,
+                "lon_max": lon_max,
+            }
+            sub_bboxes.append(bbox)
+
+        vessels_by_port: Dict[str, Dict[Any, Dict[str, Any]]] = {pid: {} for pid in resolved}
+        now = time.time()
+
         try:
             async with websockets.connect(
                 self.ws_url,
-                close_timeout=1.0,
-                ping_timeout=2.0,
+                close_timeout=2.0,
+                ping_timeout=3.0,
             ) as ws:
                 sub = {
                     "APIKey": self.api_key.strip(),
-                    "BoundingBoxes": [bbox],
+                    "BoundingBoxes": sub_bboxes,
                     "FilterMessageTypes": ["PositionReport", "ShipStaticData"],
                 }
                 await ws.send(json.dumps(sub))
 
-                vessels: Dict[Any, Dict[str, Any]] = {}
                 start = asyncio.get_event_loop().time()
                 while asyncio.get_event_loop().time() - start < sample_seconds:
+                    time_left = sample_seconds - (asyncio.get_event_loop().time() - start)
+                    if time_left <= 0:
+                        break
                     try:
-                        raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
+                        raw = await asyncio.wait_for(ws.recv(), timeout=min(2.0, time_left))
                         msg = json.loads(raw)
                         m_type = msg.get("MessageType")
                         if m_type == "SubscriptionConfirmation":
                             continue
+
                         metadata = msg.get("MetaData", {})
                         mmsi = metadata.get("MMSI")
                         if mmsi is None:
                             continue
 
-                        v_info = vessels.setdefault(mmsi, {"sog": None, "nav_status": None})
-                        if m_type == "PositionReport":
+                        v_lat = metadata.get("latitude")
+                        v_lon = metadata.get("longitude")
+                        if v_lat is None or v_lon is None:
                             pos = msg.get("Message", {}).get("PositionReport", {})
-                            if "Sog" in pos:
-                                v_info["sog"] = pos.get("Sog")
-                            if "NavigationalStatus" in pos:
-                                v_info["nav_status"] = pos.get("NavigationalStatus")
-                    except asyncio.TimeoutError:
-                        break
+                            v_lat = pos.get("Latitude")
+                            v_lon = pos.get("Longitude")
 
-                active_count = len(vessels)
+                        matched_pids: List[str] = []
+                        if v_lat is not None and v_lon is not None:
+                            v_lat_f = float(v_lat)
+                            v_lon_f = float(v_lon)
+                            for pid, r in resolved.items():
+                                if r["lat_min"] <= v_lat_f <= r["lat_max"] and r["lon_min"] <= v_lon_f <= r["lon_max"]:
+                                    matched_pids.append(pid)
+
+                            if not matched_pids and len(resolved) > 0:
+                                closest_pid = None
+                                min_dist_nm = float("inf")
+                                for pid, r in resolved.items():
+                                    d_lat = (v_lat_f - r["lat"]) * 60.0
+                                    cos_l = math.cos(math.radians(r["lat"]))
+                                    d_lon = (v_lon_f - r["lon"]) * 60.0 * cos_l
+                                    dist_nm = math.hypot(d_lat, d_lon)
+                                    if dist_nm < min_dist_nm:
+                                        min_dist_nm = dist_nm
+                                        closest_pid = pid
+                                if closest_pid and min_dist_nm <= resolved[closest_pid]["radius_nm"] * 1.25:
+                                    matched_pids.append(closest_pid)
+                        elif len(resolved) == 1:
+                            matched_pids = list(resolved.keys())
+
+                        for pid in matched_pids:
+                            v_info = vessels_by_port[pid].setdefault(mmsi, {"sog": None, "nav_status": None})
+                            if m_type == "PositionReport":
+                                pos = msg.get("Message", {}).get("PositionReport", {})
+                                if "Sog" in pos:
+                                    v_info["sog"] = pos.get("Sog")
+                                if "NavigationalStatus" in pos:
+                                    v_info["nav_status"] = pos.get("NavigationalStatus")
+                    except asyncio.TimeoutError:
+                        continue
+
+            results: Dict[str, Tuple[int, int, int]] = {}
+            for pid, v_dict in vessels_by_port.items():
+                active_count = len(v_dict)
                 stationary_count = 0
-                for v in vessels.values():
+                for v in v_dict.values():
                     nav_st = v.get("nav_status")
                     sog = v.get("sog")
                     if nav_st in (1, 5) or (sog is not None and float(sog) <= 0.5):
                         stationary_count += 1
-
                 moving_count = max(0, active_count - stationary_count)
-                return active_count, stationary_count, moving_count
+                counts = (active_count, stationary_count, moving_count)
+                results[pid] = counts
+
+                r = resolved[pid]
+                coord_key = (round(r["lat"], 2), round(r["lon"], 2))
+                self._live_vessel_cache[coord_key] = (now, counts)
+
+            return results
         except Exception as e:
-            logger.debug("AISStream WebSocket connection failed or timed out: %s", str(e))
-            return None
+            logger.debug("AISStream multi-box WebSocket connection failed: %s", str(e))
+            return {}
+
+    async def _query_aisstream_ws(
+        self, lat: float, lon: float, radius_nm: float = 8.0, sample_seconds: float = 20.0
+    ) -> Optional[Tuple[int, int, int]]:
+        """Connect to live AISStream WebSocket and sample active, stationary/anchored, and moving vessels in bounding box."""
+        boxes = {
+            "default": {
+                "lat": lat,
+                "lon": lon,
+                "radius_nm": radius_nm,
+            }
+        }
+        res = await self._query_multiple_bounding_boxes_ws(boxes, sample_seconds=sample_seconds)
+        return res.get("default")
+
+    _query_aisstream_ws._is_default = True
+
+    async def batch_query_ports_ws(
+        self, ports: List[Dict[str, Any]], sample_seconds: float = 20.0
+    ) -> Dict[str, Tuple[int, int, int]]:
+        """Query multiple ports concurrently in a single AISStream WebSocket session.
+
+        Accepts a list of port dictionaries, resolves bounding boxes,
+        subscribes via a single WebSocket connection, routes incoming AIS messages,
+        and returns counts keyed by port ID and UN/LOCODE.
+        """
+        boxes_by_port: Dict[str, Dict[str, Any]] = {}
+        for p in ports:
+            key = p.get("id") or p.get("locode")
+            if not key:
+                continue
+            lat = p.get("lat")
+            lon = p.get("lon")
+            if lat is None or lon is None:
+                port_obj = self.unlocode_db.get_port_by_locode(p.get("locode", "")) or self.unlocode_db.get_port_by_id(key)
+                if port_obj:
+                    lat, lon = port_obj.lat, port_obj.lon
+            if lat is None or lon is None:
+                continue
+
+            radius = float(p.get("geofence_radius_nm") or p.get("geofence", 8.0))
+            if p.get("locode") == "MOMFM" or key == "port-momfm":
+                radius = max(radius, 25.0)
+
+            boxes_by_port[key] = {
+                "lat": float(lat),
+                "lon": float(lon),
+                "radius_nm": radius,
+                "locode": p.get("locode"),
+            }
+
+        results = await self._query_multiple_bounding_boxes_ws(boxes_by_port, sample_seconds=sample_seconds)
+
+        # Alias results by locode if different from id
+        aliased = dict(results)
+        for p in ports:
+            key = p.get("id") or p.get("locode")
+            locode = p.get("locode")
+            if key in results and locode and locode not in aliased:
+                aliased[locode] = results[key]
+        return aliased
 
     def _persist_ais_cache(
         self,
@@ -324,13 +498,17 @@ class AISClient:
             lat, lon = port_obj.lat, port_obj.lon
 
         # 4. Query AISStream live WebSocket
+        effective_radius = geofence_radius_nm
+        if locode == "MOMFM" or port_id == "port-momfm":
+            effective_radius = max(effective_radius, 25.0)
+
         ws_counts: Optional[Tuple[int, int, int]] = None
         if self.api_key and self.api_key.strip():
             coord_key = (round(lat, 2), round(lon, 2))
             if coord_key in self._live_vessel_cache and (now - self._live_vessel_cache[coord_key][0] < 30.0):
                 ws_counts = self._live_vessel_cache[coord_key][1]
             else:
-                ws_counts = await self._query_aisstream_ws(lat, lon, geofence_radius_nm)
+                ws_counts = await self._query_aisstream_ws(lat, lon, effective_radius, sample_seconds=20.0)
                 if ws_counts is not None:
                     self._live_vessel_cache[coord_key] = (now, ws_counts)
 

@@ -7,7 +7,7 @@
     "lat": 25.4167,
     "lon": 55.4333,
     "isDefault": false,
-    "geofenceRadiusNm": 8.0,
+    "geofenceRadiusNm": 25.0,
     "addedByUserId": null,
     "notificationsEnabled": true,
     "channelDepthM": 7.2,

@@ -55,11 +55,48 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 def init_db(target_engine: Optional[Engine] = None) -> None:
-    """Create all tables defined on Base if they do not exist."""
+    """Create all tables defined on Base if they do not exist and handle schema upgrades."""
+    from sqlalchemy import inspect, text
     # Ensure models are imported so their metadata is registered on Base
     from app.db import models  # noqa: F401
 
     eng = target_engine or engine
+    inspector = inspect(eng)
+    if "monitored_ports" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("monitored_ports")]
+        if "vessel_class" not in columns:
+            with eng.begin() as conn:
+                conn.execute(text("""
+                    CREATE TABLE monitored_ports_new (
+                        id VARCHAR(64) NOT NULL PRIMARY KEY,
+                        user_id VARCHAR(255) NOT NULL,
+                        name VARCHAR(255) NOT NULL,
+                        locode VARCHAR(10) NOT NULL,
+                        country VARCHAR(100) NOT NULL,
+                        lat FLOAT NOT NULL,
+                        lon FLOAT NOT NULL,
+                        is_default BOOLEAN NOT NULL,
+                        geofence_radius_nm FLOAT NOT NULL,
+                        notifications_enabled BOOLEAN NOT NULL,
+                        vessel_class VARCHAR(50) NOT NULL DEFAULT 'neoPanamax',
+                        created_at DATETIME NOT NULL,
+                        CONSTRAINT uq_user_port_locode_vessel UNIQUE (user_id, locode, vessel_class)
+                    )
+                """))
+                conn.execute(text("""
+                    INSERT INTO monitored_ports_new (
+                        id, user_id, name, locode, country, lat, lon, is_default,
+                        geofence_radius_nm, notifications_enabled, vessel_class, created_at
+                    )
+                    SELECT
+                        id, user_id, name, locode, country, lat, lon, is_default,
+                        geofence_radius_nm, notifications_enabled, 'neoPanamax', created_at
+                    FROM monitored_ports
+                """))
+                conn.execute(text("DROP TABLE monitored_ports"))
+                conn.execute(text("ALTER TABLE monitored_ports_new RENAME TO monitored_ports"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_monitored_ports_user_id ON monitored_ports (user_id)"))
+
     Base.metadata.create_all(bind=eng)
 
 

@@ -76,7 +76,11 @@ export function useRiskAssessments(
       setError(null);
       try {
         const data = await services.risk.getBulkRiskAssessments(
-          ports.map((p) => ({ id: p.id, name: p.name })),
+          ports.map((p) => ({
+            id: p.id,
+            name: p.name,
+            vesselClass: p.vesselClass || vesselClass,
+          })),
           vesselClass,
           forceRefresh
         );

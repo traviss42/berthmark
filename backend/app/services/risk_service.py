@@ -277,10 +277,11 @@ class RiskService:
         """Evaluate risk across multiple ports with caching."""
         results: List[RiskAssessment] = []
         for p in ports:
+            target_class = getattr(p, "vesselClass", None) or vessel_class
             assessment = await self.get_risk_assessment(
                 port_id=p.id,
                 port_name=p.name,
-                vessel_class=vessel_class,
+                vessel_class=target_class,
                 user_id=user_id,
                 force_refresh=force_refresh,
             )

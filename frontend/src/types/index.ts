@@ -50,6 +50,7 @@ export interface Port {
   isDefault: boolean;
   geofenceRadiusNm: number;
   addedByUserId: string | null;
+  vesselClass?: VesselClass;
   notificationsEnabled?: boolean;
   channelDepthM?: number | null;
   cargoPierDepthM?: number | null;

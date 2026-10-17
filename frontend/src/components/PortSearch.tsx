@@ -6,9 +6,10 @@ import { getServices } from '@/services';
 interface Props {
   onAddPort: (port: Omit<Port, 'id' | 'isDefault' | 'addedByUserId'>) => Promise<unknown>;
   existingLocodes: string[];
+  vesselClassLabel?: string;
 }
 
-export function PortSearch({ onAddPort, existingLocodes }: Props) {
+export function PortSearch({ onAddPort, existingLocodes, vesselClassLabel }: Props) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Port[]>([]);
   const [loading, setLoading] = useState(false);
@@ -81,7 +82,11 @@ export function PortSearch({ onAddPort, existingLocodes }: Props) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => results.length > 0 && setOpen(true)}
-          placeholder="Search ports by name, LOCODE, or country..."
+          placeholder={
+            vesselClassLabel
+              ? `Search ports to monitor for ${vesselClassLabel}...`
+              : 'Search ports by name, LOCODE, or country...'
+          }
           className="w-full pl-10 pr-4 py-2.5 text-sm rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition-all"
         />
         {query && (
@@ -121,10 +126,11 @@ export function PortSearch({ onAddPort, existingLocodes }: Props) {
                 <button
                   onClick={() => handleAdd(port)}
                   disabled={alreadyAdded || adding}
+                  title={alreadyAdded ? `Already subscribed for ${vesselClassLabel || 'this class'}` : undefined}
                   className="flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-md bg-blue-50 text-blue-600 hover:bg-blue-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  {alreadyAdded ? 'Added' : 'Add'}
+                  {alreadyAdded ? 'Added' : vesselClassLabel ? `Add for ${vesselClassLabel}` : 'Add'}
                 </button>
               </div>
             );

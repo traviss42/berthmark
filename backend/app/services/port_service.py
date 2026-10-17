@@ -45,15 +45,15 @@ class PortService:
             }
         )
 
-    async def get_ports(self, user_id: str) -> List[Port]:
-        """Return ports monitored by this user from the database."""
+    async def get_ports(
+        self, user_id: str, vessel_class: Optional[str] = None
+    ) -> List[Port]:
+        """Return ports monitored by this user from the database, optionally filtered by vessel class."""
         with get_db_context() as db:
-            records = (
-                db.query(MonitoredPort)
-                .filter(MonitoredPort.user_id == user_id)
-                .order_by(MonitoredPort.created_at.asc())
-                .all()
-            )
+            query = db.query(MonitoredPort).filter(MonitoredPort.user_id == user_id)
+            if vessel_class:
+                query = query.filter(MonitoredPort.vessel_class == vessel_class)
+            records = query.order_by(MonitoredPort.created_at.asc()).all()
             return [self._enrich_with_wpi(r.to_pydantic()) for r in records]
 
     async def get_default_ports(self) -> List[Port]:
@@ -96,19 +96,20 @@ class PortService:
     async def add_port(self, request: CreatePortRequest, user_id: str) -> Port:
         """Add a custom monitored port scoped privately to the user in the database."""
         with get_db_context() as db:
-            # Check if already added by this user
+            # Check if already added by this user for the same vessel class
             existing = (
                 db.query(MonitoredPort)
                 .filter(
                     MonitoredPort.user_id == user_id,
                     MonitoredPort.locode == request.locode.upper(),
+                    MonitoredPort.vessel_class == request.vesselClass,
                 )
                 .first()
             )
             if existing:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail=f"Port with UN/LOCODE '{request.locode}' is already monitored by this user.",
+                    detail=f"Port with UN/LOCODE '{request.locode}' is already monitored for vessel class '{request.vesselClass}' by this user.",
                 )
 
             port_id = f"port-user-{int(time.time())}-{uuid.uuid4().hex[:6]}"
@@ -122,6 +123,7 @@ class PortService:
                 lon=request.lon,
                 is_default=False,
                 geofence_radius_nm=request.geofenceRadiusNm,
+                vessel_class=request.vesselClass,
                 notifications_enabled=getattr(request, "notificationsEnabled", True),
             )
             db.add(db_port)

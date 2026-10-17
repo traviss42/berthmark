@@ -13,13 +13,14 @@ router = APIRouter(prefix="/api/v1/ports", tags=["Ports"])
     "",
     response_model=List[Port],
     summary="Get monitored ports for the authenticated user",
-    description="Returns global default ports plus custom ports added by the authenticated user.",
+    description="Returns global default ports plus custom ports added by the authenticated user, optionally filtered by vessel class.",
 )
 async def get_monitored_ports(
+    vesselClass: Optional[str] = Query(None, description="Optional vessel class filter"),
     current_user: str = Depends(get_current_user),
     service: PortService = Depends(lambda: port_service),
 ) -> List[Port]:
-    return await service.get_ports(user_id=current_user)
+    return await service.get_ports(user_id=current_user, vessel_class=vesselClass)
 
 
 @router.post(

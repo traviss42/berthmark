@@ -20,6 +20,7 @@ DEFAULT_INGESTION_HUBS = [
     {"id": "port-cnsgh", "name": "Port of Shanghai", "locode": "CNSGH", "lat": 31.2333, "lon": 121.4667},
     {"id": "port-deham", "name": "Port of Hamburg", "locode": "DEHAM", "lat": 53.55, "lon": 9.9833},
     {"id": "port-uslax", "name": "Port of Los Angeles", "locode": "USLAX", "lat": 33.7333, "lon": -118.2667},
+    {"id": "port-momfm", "name": "Port of Macau", "locode": "MOMFM", "lat": 22.2, "lon": 113.5333, "geofence": 25.0},
 ]
 
 INGESTION_VESSEL_CLASSES = ["neoPanamax", "panamax", "feeder"]
@@ -46,6 +47,7 @@ async def run_ingestion_cycle() -> Dict[str, Any]:
                     "lat": mp.lat,
                     "lon": mp.lon,
                     "geofence": mp.geofence_radius_nm,
+                    "vessel_class": mp.vessel_class,
                 })
     except Exception as e:
         logger.warning("Failed to query monitored ports for ingestion: %s", str(e))
@@ -61,12 +63,32 @@ async def run_ingestion_cycle() -> Dict[str, Any]:
                 "lat": hub["lat"],
                 "lon": hub["lon"],
                 "geofence": 8.0,
+                "vessel_class": "neoPanamax",
             })
+
+    # 3. Deduplicate unique ports for concurrent batch AISStream sampling
+    unique_ports_map: Dict[str, Dict[str, Any]] = {}
+    for p in ports_to_ingest:
+        key = p.get("locode") or p.get("id")
+        if key not in unique_ports_map:
+            unique_ports_map[key] = p
+    unique_ports = list(unique_ports_map.values())
+
+    # Concurrently sample live AISStream traffic for all bounding boxes in one connection
+    try:
+        logger.info(
+            "Batch querying AISStream WebSocket with %d bounding boxes...",
+            len(unique_ports),
+        )
+        batch_counts = await _ais_client.batch_query_ports_ws(unique_ports, sample_seconds=20.0)
+        logger.info("Batch AISStream query returned data for %d ports.", len(batch_counts))
+    except Exception as e:
+        logger.warning("Batch AISStream query failed, falling back to per-port lookup: %s", str(e))
 
     weather_updated = 0
     ais_updated = 0
 
-    # 3. Ingest fresh data for each target port with force_refresh=True
+    # 4. Ingest fresh data for each target port with force_refresh=True
     for port in ports_to_ingest:
         port_id = port["id"]
         locode = port["locode"]
@@ -86,8 +108,11 @@ async def run_ingestion_cycle() -> Dict[str, Any]:
         except Exception as e:
             logger.warning("Ingestion failed for weather at %s (%s): %s", port["name"], port_id, str(e))
 
-        # Ingest fresh AIS Traffic for primary vessel classes
-        for vc in INGESTION_VESSEL_CLASSES:
+        # Ingest fresh AIS Traffic for primary and subscribed vessel classes
+        target_classes = set(INGESTION_VESSEL_CLASSES)
+        if port.get("vessel_class"):
+            target_classes.add(port["vessel_class"])
+        for vc in target_classes:
             try:
                 await _ais_client.get_port_traffic_metrics(
                     port_id=port_id,

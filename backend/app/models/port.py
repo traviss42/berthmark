@@ -1,7 +1,6 @@
-"""Port domain models for tracking, search, and configuration."""
-
 from typing import Optional
 from pydantic import BaseModel, Field
+from app.models.common import VesselClass
 
 
 class Port(BaseModel):
@@ -22,6 +21,11 @@ class Port(BaseModel):
         default=None,
         description="User ID for private custom ports; null for default ports",
         examples=[None],
+    )
+    vesselClass: VesselClass = Field(
+        default="neoPanamax",
+        description="Vessel class associated with this monitored port subscription",
+        examples=["neoPanamax"],
     )
     notificationsEnabled: bool = Field(
         default=True,
@@ -108,6 +112,11 @@ class CreatePortRequest(BaseModel):
         le=50.0,
         description="Configured geofence radius in nautical miles",
         examples=[8.0],
+    )
+    vesselClass: VesselClass = Field(
+        default="neoPanamax",
+        description="Vessel class to monitor for this port subscription",
+        examples=["neoPanamax"],
     )
     notificationsEnabled: bool = Field(
         default=True,

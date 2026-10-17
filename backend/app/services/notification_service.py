@@ -89,6 +89,7 @@ class NotificationService:
 
         # Check if user has opted out of notifications for this port in the database
         port_notifications_enabled = True
+        vessel_label: Optional[str] = None
         with get_db_context() as db:
             monitored_port = (
                 db.query(MonitoredPort)
@@ -98,8 +99,20 @@ class NotificationService:
                 )
                 .first()
             )
-            if monitored_port and not monitored_port.notifications_enabled:
-                port_notifications_enabled = False
+            if monitored_port:
+                if not monitored_port.notifications_enabled:
+                    port_notifications_enabled = False
+                if monitored_port.vessel_class:
+                    from app.services.risk_service import VESSEL_CLASS_METADATA
+                    vessel_label = VESSEL_CLASS_METADATA.get(monitored_port.vessel_class, {}).get("label")
+
+            if vessel_label:
+                title = f"{alert_req.portName} ({vessel_label}): Risk tier changed to {new_label}"
+                message = (
+                    f"{alert_req.portName} ({vessel_label}) risk status shifted from {prev_label} to {new_label}."
+                    if prev_label
+                    else f"{alert_req.portName} ({vessel_label}) initial risk assessment: {new_label}."
+                )
 
             recipient_email = None
             if port_notifications_enabled:
@@ -128,9 +141,11 @@ class NotificationService:
         if recipient_email:
             try:
                 from app.services.email_service import email_service
+                vessel_line = f"Vessel Class: {vessel_label}\n" if vessel_label else ""
                 email_body = (
                     f"Operational Alert: Risk State Transition\n\n"
                     f"Port: {alert_req.portName}\n"
+                    f"{vessel_line}"
                     f"Alert: {message}\n"
                     f"New Risk Tier: {new_label}\n"
                     f"Previous Tier: {prev_label or 'None'}\n"
@@ -138,9 +153,10 @@ class NotificationService:
                     f"Destination: {recipient_email}\n"
                     f"To adjust your notification preferences, visit your Berthmark dashboard.\n"
                 )
+                subject_vessel = f" [{vessel_label}]" if vessel_label else ""
                 await email_service.send_email(
                     to_email=recipient_email,
-                    subject=f"[Berthmark Alert] {alert_req.portName}: Risk shifted to {new_label}",
+                    subject=f"[Berthmark Alert] {alert_req.portName}{subject_vessel}: Risk shifted to {new_label}",
                     plain_text=email_body,
                 )
             except Exception:
@@ -156,6 +172,10 @@ class NotificationService:
         now_str = datetime.now(timezone.utc).isoformat()
         notif_id = f"notif-{int(time.time())}-{uuid.uuid4().hex[:6]}"
 
+        vessel_class = getattr(port, "vesselClass", None) or getattr(port, "vessel_class", None) or "neoPanamax"
+        from app.services.risk_service import VESSEL_CLASS_METADATA
+        vessel_label = VESSEL_CLASS_METADATA.get(vessel_class, {}).get("label", vessel_class)
+
         tier: RiskTier = "low"
         score = 25.0
         wind_speed = 0.0
@@ -169,7 +189,7 @@ class NotificationService:
             assessment = await risk_service.get_risk_assessment(
                 port_id=port.id,
                 port_name=port.name,
-                vessel_class="neoPanamax",
+                vessel_class=vessel_class,
                 user_id=user_id,
             )
             tier = assessment.compositeTier
@@ -183,9 +203,9 @@ class NotificationService:
             pass
 
         tier_label = TIER_LABELS.get(tier, tier.capitalize())
-        title = f"{port.name}: Subscribed (Baseline Risk: {tier_label})"
+        title = f"{port.name} ({vessel_label}): Subscribed (Baseline Risk: {tier_label})"
         message = (
-            f"Successfully subscribed to alerts for {port.name} [{port.locode}]. "
+            f"Successfully subscribed to {vessel_label} alerts for {port.name} [{port.locode}]. "
             f"Current baseline risk: {tier_label} (Score: {score:.1f}/100, "
             f"Wind: {wind_speed:.1f} kts, Waves: {wave_height:.1f}m, "
             f"Anchorage Queue: {queue_count} vessels, Channel Depth: {channel_depth:.1f}m). "
@@ -217,6 +237,7 @@ class NotificationService:
             f"Welcome to Berthmark Port-Call Risk Tracker!\n\n"
             f"You have subscribed to automated operational & weather alerts for:\n"
             f"  Port: {port.name} [{port.locode}] - {port.country}\n"
+            f"  Vessel Class: {vessel_label}\n"
             f"  Destination: {recipient_email}\n\n"
             f"CURRENT LIVE BASELINE CONDITIONS:\n"
             f"  • Composite Risk Tier: {tier_label} (Score: {score:.1f}/100)\n"
@@ -231,7 +252,7 @@ class NotificationService:
             from app.services.email_service import email_service
             await email_service.send_email(
                 to_email=recipient_email,
-                subject=f"[Berthmark Alert] Subscribed to {port.name} (Baseline Risk: {tier_label})",
+                subject=f"[Berthmark Alert] Subscribed to {port.name} [{vessel_label}] (Baseline Risk: {tier_label})",
                 plain_text=email_body,
             )
         except Exception:

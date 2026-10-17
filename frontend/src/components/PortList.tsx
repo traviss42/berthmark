@@ -1,10 +1,13 @@
-import { MapPin, ChevronRight, Globe, Trash2, Bell, BellOff } from 'lucide-react';
-import type { Port, RiskAssessment } from '@/types';
+import { useMemo } from 'react';
+import { MapPin, ChevronRight, Globe, Trash2, Bell, BellOff, Ship } from 'lucide-react';
+import type { Port, RiskAssessment, VesselClass } from '@/types';
+import { getVesselClassInfo } from '@/data/vesselTaxonomy';
 import { RiskBadge } from './RiskBadge';
 
 interface Props {
   ports: Port[];
   assessments: Map<string, RiskAssessment>;
+  activeVesselClass: VesselClass;
   onSelectPort: (portId: string) => void;
   onRemovePort?: (portId: string) => void;
   onToggleNotifications?: (portId: string, enabled: boolean) => void;
@@ -15,12 +18,59 @@ interface Props {
 export function PortList({
   ports,
   assessments,
+  activeVesselClass,
   onSelectPort,
   onRemovePort,
   onToggleNotifications,
   userEmail,
   loading,
 }: Props) {
+  const portsByClass = useMemo(() => {
+    const map = new Map<VesselClass, Port[]>();
+    ports.forEach((p) => {
+      const cls = (p.vesselClass as VesselClass) || 'neoPanamax';
+      const list = map.get(cls) || [];
+      list.push(p);
+      map.set(cls, list);
+    });
+    return map;
+  }, [ports]);
+
+  const clusters = useMemo(() => {
+    const result: {
+      vesselClass: VesselClass;
+      label: string;
+      ports: Port[];
+      isActive: boolean;
+    }[] = [];
+
+    const activeInfo = getVesselClassInfo(activeVesselClass);
+    const activePorts = portsByClass.get(activeVesselClass) || [];
+
+    // 1. Selected vessel class is pinned to the top
+    result.push({
+      vesselClass: activeVesselClass,
+      label: activeInfo.label,
+      ports: activePorts,
+      isActive: true,
+    });
+
+    // 2. All other vessel classes that have monitored ports
+    portsByClass.forEach((clsPorts, cls) => {
+      if (cls !== activeVesselClass && clsPorts.length > 0) {
+        const info = getVesselClassInfo(cls);
+        result.push({
+          vesselClass: cls,
+          label: info.label,
+          ports: clsPorts,
+          isActive: false,
+        });
+      }
+    });
+
+    return result;
+  }, [portsByClass, activeVesselClass]);
+
   if (loading) {
     return (
       <div className="space-y-3">
@@ -43,102 +93,169 @@ export function PortList({
   }
 
   if (ports.length === 0) {
+    const activeLabel = getVesselClassInfo(activeVesselClass).label;
     return (
       <div className="text-center py-16 px-4 rounded-xl border border-dashed border-slate-300 bg-white shadow-sm">
         <Globe className="w-12 h-12 text-slate-300 mx-auto mb-3" />
         <h3 className="text-sm font-semibold text-slate-700">No ports monitored</h3>
         <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-          You are not currently monitoring any ports. Use the search bar above to look up ports by name, UN/LOCODE (e.g. NLRTM, SGSIN), or country.
+          You are not currently monitoring any ports. Use the search bar above to look up ports and subscribe for{' '}
+          <strong className="text-slate-700">{activeLabel}</strong>.
         </p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-2.5">
-      {ports.map((port) => {
-        const assessment = assessments.get(port.id);
-        const isNotifEnabled = port.notificationsEnabled !== false;
+    <div className="space-y-6">
+      {clusters.map((cluster) => {
         return (
-          <div
-            key={port.id}
-            onClick={() => onSelectPort(port.id)}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                onSelectPort(port.id);
-              }
-            }}
-            className="w-full text-left rounded-xl border border-slate-200 bg-white p-4 hover:border-blue-300 hover:shadow-md transition-all cursor-pointer group"
-          >
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                  port.isDefault ? 'bg-blue-50' : 'bg-emerald-50'
-                }`}>
-                  <MapPin className={`w-5 h-5 ${port.isDefault ? 'text-blue-500' : 'text-emerald-500'}`} />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-slate-900 truncate">{port.name}</div>
-                  <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-2 flex-wrap">
-                    <span>{port.locode} · {port.country} · {port.geofenceRadiusNm}nm</span>
-                    {isNotifEnabled ? (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
-                        <Bell className="w-2.5 h-2.5" /> Email alerts ON
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
-                        <BellOff className="w-2.5 h-2.5" /> Email alerts OFF
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center gap-2.5 flex-shrink-0">
-                {assessment ? (
-                  <RiskBadge tier={assessment.compositeTier} size="sm" />
-                ) : (
-                  <span className="text-xs text-slate-400">Loading risk...</span>
+          <div key={cluster.vesselClass} className="space-y-3">
+            {/* Cluster Header */}
+            <div className="flex items-center justify-between pb-1">
+              <div className="flex items-center gap-2">
+                <span
+                  className={`w-2.5 h-2.5 rounded-full ${
+                    cluster.isActive ? 'bg-blue-600' : 'bg-slate-400'
+                  }`}
+                />
+                <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                  <Ship className="w-4 h-4 text-slate-500" />
+                  <span>{cluster.label}</span>
+                </h3>
+                {cluster.isActive && (
+                  <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200">
+                    Active Focus
+                  </span>
                 )}
-                {onToggleNotifications && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onToggleNotifications(port.id, !isNotifEnabled);
-                    }}
-                    title={
-                      isNotifEnabled
-                        ? `Email notifications ON (sent to ${userEmail || 'your email'}). Click to opt out.`
-                        : 'Email notifications OFF. Click to opt in.'
-                    }
-                    className={`p-1.5 rounded-lg transition-colors ${
-                      isNotifEnabled
-                        ? 'text-blue-600 hover:text-blue-700 hover:bg-blue-50'
-                        : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
-                    }`}
-                  >
-                    {isNotifEnabled ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
-                  </button>
-                )}
-                {onRemovePort && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onRemovePort(port.id);
-                    }}
-                    title="Remove port from monitored list"
-                    className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                )}
-                <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-slate-500 group-hover:translate-x-0.5 transition-all" />
+                <span className="text-xs text-slate-400 font-medium">
+                  ({cluster.ports.length} {cluster.ports.length === 1 ? 'subscription' : 'subscriptions'})
+                </span>
               </div>
             </div>
+
+            {/* Empty state specifically for the active section if it has no ports yet */}
+            {cluster.ports.length === 0 && (
+              <div className="rounded-xl border-2 border-dashed border-blue-200 bg-blue-50/40 p-5 text-center">
+                <Ship className="w-7 h-7 text-blue-400 mx-auto mb-2" />
+                <h4 className="text-xs font-semibold text-blue-900">
+                  No monitored ports for {cluster.label} yet
+                </h4>
+                <p className="text-xs text-blue-700/80 mt-1 max-w-md mx-auto">
+                  Search ports above to subscribe for {cluster.label}. Your existing subscriptions for other vessel classes are listed below.
+                </p>
+              </div>
+            )}
+
+            {/* Port Cards in Cluster */}
+            {cluster.ports.length > 0 && (
+              <div className="space-y-2.5">
+                {cluster.ports.map((port) => {
+                  const assessment = assessments.get(port.id);
+                  const isNotifEnabled = port.notificationsEnabled !== false;
+                  return (
+                    <div
+                      key={port.id}
+                      onClick={() => onSelectPort(port.id)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          onSelectPort(port.id);
+                        }
+                      }}
+                      className="w-full text-left rounded-xl border border-slate-200 bg-white p-4 hover:border-blue-300 hover:shadow-md transition-all cursor-pointer group"
+                    >
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div
+                            className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                              port.isDefault ? 'bg-blue-50' : 'bg-emerald-50'
+                            }`}
+                          >
+                            <MapPin
+                              className={`w-5 h-5 ${
+                                port.isDefault ? 'text-blue-500' : 'text-emerald-500'
+                              }`}
+                            />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-semibold text-slate-900 truncate">
+                                {port.name}
+                              </span>
+                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                                <Ship className="w-2.5 h-2.5 text-slate-500" />
+                                {cluster.label}
+                              </span>
+                            </div>
+                            <div className="text-xs text-slate-500 mt-1 flex items-center gap-2 flex-wrap">
+                              <span>
+                                {port.locode} · {port.country} · {port.geofenceRadiusNm}nm
+                              </span>
+                              {isNotifEnabled ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
+                                  <Bell className="w-2.5 h-2.5" /> Email alerts ON
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                                  <BellOff className="w-2.5 h-2.5" /> Email alerts OFF
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2.5 flex-shrink-0">
+                          {assessment ? (
+                            <RiskBadge tier={assessment.compositeTier} size="sm" />
+                          ) : (
+                            <span className="text-xs text-slate-400">Loading risk...</span>
+                          )}
+                          {onToggleNotifications && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onToggleNotifications(port.id, !isNotifEnabled);
+                              }}
+                              title={
+                                isNotifEnabled
+                                  ? `Email notifications ON (sent to ${
+                                      userEmail || 'your email'
+                                    }). Click to opt out.`
+                                  : 'Email notifications OFF. Click to opt in.'
+                              }
+                              className={`p-1.5 rounded-lg transition-colors ${
+                                isNotifEnabled
+                                  ? 'text-blue-600 hover:text-blue-700 hover:bg-blue-50'
+                                  : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
+                              }`}
+                            >
+                              {isNotifEnabled ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
+                            </button>
+                          )}
+                          {onRemovePort && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onRemovePort(port.id);
+                              }}
+                              title="Remove port subscription"
+                              className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                          <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-slate-500 group-hover:translate-x-0.5 transition-all" />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         );
       })}

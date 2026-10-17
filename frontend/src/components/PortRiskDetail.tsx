@@ -59,7 +59,7 @@ export function PortRiskDetail({
             className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 transition-colors"
           >
             <RefreshCw className={`w-4 h-4 text-slate-500 ${refreshing ? 'animate-spin' : ''}`} />
-            <span className="text-slate-600">Refresh</span>
+            <span className="text-slate-600">{refreshing ? 'Loading live vessel data...' : 'Refresh'}</span>
           </button>
           {canRemove && onRemove && (
             <button
@@ -72,6 +72,17 @@ export function PortRiskDetail({
           )}
         </div>
       </div>
+
+      {/* Live Ingestion Loading Notification Banner */}
+      {refreshing && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50/90 p-4 flex items-center gap-3 text-blue-900 shadow-sm animate-pulse">
+          <RefreshCw className="w-5 h-5 text-blue-600 animate-spin shrink-0" />
+          <div className="text-sm">
+            <span className="font-semibold">Loading live vessel data...</span>
+            <span className="ml-1.5 text-blue-700">Connecting to AISStream WebSocket telemetry across a 20-second sampling window.</span>
+          </div>
+        </div>
+      )}
 
       {/* Email Notifications Settings Card */}
       <div className="rounded-xl border border-slate-200 bg-white p-4 flex items-center justify-between gap-4 flex-wrap shadow-sm">
@@ -147,14 +158,23 @@ export function PortRiskDetail({
         <SubRiskBreakdown subRisks={assessment.subRisks} />
       </div>
 
+
+
       {/* Raw Metrics */}
       <div>
         <h3 className="text-sm font-semibold text-slate-700 mb-3">Live & Hydrographic Metrics</h3>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Congestion Metrics */}
           <div className="rounded-lg border border-slate-200 p-4 bg-white">
-            <h4 className="text-sm font-medium text-slate-700 mb-3 flex items-center gap-2">
-              <Anchor className="w-4 h-4 text-slate-500" /> Vessel Traffic (AISStream)
+            <h4 className="text-sm font-medium text-slate-700 mb-3 flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <Anchor className="w-4 h-4 text-slate-500" /> Vessel Traffic (AISStream)
+              </span>
+              {refreshing && (
+                <span className="text-xs text-blue-600 font-normal animate-pulse flex items-center gap-1">
+                  <RefreshCw className="w-3 h-3 animate-spin" /> Loading live vessel data...
+                </span>
+              )}
             </h4>
             <div className="grid grid-cols-2 gap-3 text-sm">
               <Metric label="Anchored / Stationary" value={`${m.congestion.anchorageQueueCount} vessels`} />
