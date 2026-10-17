@@ -22,9 +22,7 @@ def setup_test_db():
 def reset_database():
     """Clear database tables and reset service cooldown states before each test to maintain strict test isolation."""
     from app.services.notification_service import notification_service
-    from app.services.port_service import port_service
     notification_service.clear_cooldown()
-    port_service._removed_defaults.clear()
 
     with get_db_context() as db:
         db.query(NotificationRecord).delete()
@@ -34,7 +32,6 @@ def reset_database():
         db.commit()
     yield
     notification_service.clear_cooldown()
-    port_service._removed_defaults.clear()
 
 
 @pytest.fixture

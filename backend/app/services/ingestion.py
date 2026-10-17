@@ -22,31 +22,36 @@ _weather_client = MarineWeatherClient()
 _ais_client = AISClient()
 
 
-def get_monitored_ports_for_ingestion() -> List[Dict[str, Any]]:
-    """Gather all global default ports plus user-monitored ports for continuous telemetry ingestion."""
-    ports_to_ingest: List[Dict[str, Any]] = []
-    seen_locodes = set()
-
-    # 1. Global default ports from UN/LOCODE reference database
+def get_all_maritime_ports_for_stream() -> List[Dict[str, Any]]:
+    """Gather all maritime ports with valid coordinates from UN/LOCODE reference database for stream monitoring."""
     try:
         from app.clients.unlocode_db import UnlocodeDatabase
         db_ref = UnlocodeDatabase()
-        for dp in db_ref.get_default_ports():
-            code = dp.locode.upper()
-            seen_locodes.add(code)
-            ports_to_ingest.append({
-                "id": dp.id,
-                "name": dp.name,
-                "locode": dp.locode,
-                "lat": dp.lat,
-                "lon": dp.lon,
-                "geofence": dp.geofenceRadiusNm or 8.0,
-                "vessel_class": dp.vesselClass or "neoPanamax",
-            })
+        with db_ref._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, locode, name, lat, lon, geofence_radius_nm FROM unlocode_ports;")
+            rows = cursor.fetchall()
+            return [
+                {
+                    "id": r["id"],
+                    "name": r["name"],
+                    "locode": r["locode"],
+                    "lat": r["lat"],
+                    "lon": r["lon"],
+                    "geofence": r["geofence_radius_nm"] or 8.0,
+                    "vessel_class": "neoPanamax",
+                }
+                for r in rows
+            ]
     except Exception as e:
-        logger.warning("Failed to query default ports for ingestion: %s", str(e))
+        logger.warning("Failed to query maritime ports for stream subscription: %s", str(e))
+        return []
 
-    # 2. User-monitored custom ports from SQLite
+
+def get_monitored_ports_for_ingestion() -> List[Dict[str, Any]]:
+    """Gather user-monitored ports from SQLite for continuous periodic telemetry ingestion."""
+    ports_to_ingest: List[Dict[str, Any]] = []
+    seen_locodes = set()
     try:
         with get_db_context() as db:
             monitored = db.query(MonitoredPort).all()
@@ -69,18 +74,92 @@ def get_monitored_ports_for_ingestion() -> List[Dict[str, Any]]:
     return ports_to_ingest
 
 
+def flush_stream_snapshot_to_cache() -> int:
+    """Flush tracked vessel metrics from in-memory stream manager to SQLite ExternalAISTrafficCache."""
+    stream_mgr = get_stream_manager()
+    persisted = 0
+    now_utc = datetime.now(timezone.utc)
+    try:
+        from app.clients.unlocode_db import UnlocodeDatabase
+        from app.models.external_cache import ExternalAISTrafficCache
+        db_ref = UnlocodeDatabase()
+        with get_db_context() as db:
+            for port_key, vessels in stream_mgr._vessels.items():
+                if not vessels:
+                    continue
+                counts = stream_mgr.get_port_counts(port_key)
+                if not counts:
+                    continue
+                active, stationary, moving = counts
+                port = db_ref.get_port_by_id(port_key) or db_ref.get_port_by_locode(port_key)
+                if not port or port.channelDepthM is None or port.channelDepthM <= 0:
+                    continue
+                cache_key = f"{port.id}:neoPanamax"
+                rec = db.query(ExternalAISTrafficCache).filter(
+                    (ExternalAISTrafficCache.id == cache_key)
+                    | (
+                        (ExternalAISTrafficCache.locode == port.locode)
+                        & (ExternalAISTrafficCache.vessel_class == "neoPanamax")
+                    )
+                ).first()
+                vessel_draft = 15.2
+                channel_depth = float(port.channelDepthM)
+                ukc = round(channel_depth - vessel_draft, 2)
+                if not rec:
+                    rec = ExternalAISTrafficCache(
+                        id=cache_key,
+                        port_id=port.id,
+                        locode=port.locode,
+                        vessel_class="neoPanamax",
+                        anchorage_queue_count=stationary,
+                        active_vessel_count=active,
+                        moving_vessel_count=moving,
+                        rolling_30d_avg_queue=float(stationary),
+                        under_keel_clearance_m=ukc,
+                        channel_depth_m=channel_depth,
+                        cargo_pier_depth_m=port.cargoPierDepthM,
+                        anchorage_depth_m=port.anchorageDepthM,
+                        vessel_draft_m=vessel_draft,
+                        overhead_limits=port.overheadLimits or "Unknown",
+                        pilotage_available=port.pilotageAvailable is not False,
+                        tugs_assistance=port.tugsAssistance is not False,
+                        tide_height_m=float(port.tidalRangeM) if port.tidalRangeM is not None else 0.0,
+                        harbor_size=port.harborSize,
+                        shelter_afforded=port.shelterAfforded,
+                        source="aisstream-stream",
+                        fetched_at=now_utc,
+                    )
+                    db.add(rec)
+                else:
+                    rec.anchorage_queue_count = stationary
+                    rec.active_vessel_count = active
+                    rec.moving_vessel_count = moving
+                    rec.fetched_at = now_utc
+                persisted += 1
+            db.commit()
+        logger.info("Flushed stream vessel counts for %d active ports.", persisted)
+    except Exception as e:
+        logger.warning("Failed flushing stream snapshot to cache: %s", str(e))
+    return persisted
+
+
 async def initialize_startup_stream(warmup_seconds: float = 20.0) -> None:
-    """Initialize persistent AISStream WebSocket listener and execute warm-up initialization."""
-    ports = get_monitored_ports_for_ingestion()
+    """Initialize persistent AISStream WebSocket listener with every port bounding box and execute warm-up."""
+    ports = get_all_maritime_ports_for_stream()
     stream_mgr = get_stream_manager()
     await stream_mgr.start(ports, warmup_seconds=warmup_seconds)
 
     if stream_mgr.is_warming_up:
-        logger.info("Stream warm-up active: waiting %.1fs for initial fleet aggregation...", warmup_seconds)
+        logger.info(
+            "Stream warm-up active: waiting %.1fs for initial fleet aggregation across all %d ports...",
+            warmup_seconds,
+            len(ports),
+        )
         while stream_mgr.is_warming_up:
             await asyncio.sleep(1.0)
         logger.info("Stream warm-up complete. Flushing initial baseline snapshot to SQLite...")
         try:
+            flush_stream_snapshot_to_cache()
             await run_ingestion_cycle()
         except Exception as e:
             logger.warning("Initial snapshot flush encountered error: %s", str(e))

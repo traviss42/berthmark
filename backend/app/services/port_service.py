@@ -14,16 +14,10 @@ logger = logging.getLogger(__name__)
 
 
 class PortService:
-    """Service for managing default and user-monitored ports backed by SQLAlchemy database."""
+    """Service for managing user-monitored ports backed by SQLAlchemy database."""
 
     def __init__(self, directory_client: Optional[PortDirectoryClient] = None):
         self.directory_client = directory_client or PortDirectoryClient()
-
-        # In-memory index of default ports from UN/LOCODE reference database
-        self._default_ports: Dict[str, Port] = {}
-        for p in self.directory_client.get_default_ports():
-            self._default_ports[p.id] = p
-        self._removed_defaults: Dict[str, Set[str]] = {}
 
     def _enrich_with_wpi(self, port: Port) -> Port:
         """Enrich a user-monitored Port with NGA World Port Index hydrographic fields if available in UN/LOCODE DB."""
@@ -52,39 +46,24 @@ class PortService:
     async def get_ports(
         self, user_id: str, vessel_class: Optional[str] = None
     ) -> List[Port]:
-        """Return global default ports plus custom ports added by the authenticated user."""
-        vc = vessel_class or "neoPanamax"
+        """Return monitored ports for the authenticated user (starts empty, user adds ports)."""
         with get_db_context() as db:
             query = db.query(MonitoredPort).filter(MonitoredPort.user_id == user_id)
             if vessel_class:
                 query = query.filter(MonitoredPort.vessel_class == vessel_class)
             records = query.order_by(MonitoredPort.created_at.asc()).all()
-            user_ports = [self._enrich_with_wpi(r.to_pydantic()) for r in records]
-
-        user_locodes = {p.locode.upper() for p in user_ports}
-        removed_set = self._removed_defaults.get(user_id, set())
-
-        result: List[Port] = []
-        for dp in self._default_ports.values():
-            if dp.id not in removed_set and dp.locode.upper() not in user_locodes:
-                enriched_dp = self._enrich_with_wpi(
-                    dp.model_copy(update={"vesselClass": vc, "notificationsEnabled": True})
-                )
-                result.append(enriched_dp)
-
-        result.extend(user_ports)
-        return result
+            return [self._enrich_with_wpi(r.to_pydantic()) for r in records]
 
     async def get_default_ports(self) -> List[Port]:
-        """Return only default global ports from the UN/LOCODE database."""
-        return list(self._default_ports.values())
+        """Return benchmark ports from the UN/LOCODE database."""
+        return self.directory_client.get_default_ports()
 
     async def search_ports(self, query: str) -> List[Port]:
         """Search global UN/LOCODE database."""
         return await self.directory_client.search_ports(query)
 
     async def get_port_by_id(self, port_id: str, user_id: Optional[str] = None) -> Port:
-        """Find a port by ID in user monitored ports, default hubs, or global database."""
+        """Find a port by ID in user monitored ports or global database."""
         if user_id:
             with get_db_context() as db:
                 user_port = (
@@ -94,9 +73,6 @@ class PortService:
                 )
                 if user_port:
                     return self._enrich_with_wpi(user_port.to_pydantic())
-
-        if port_id in self._default_ports:
-            return self._default_ports[port_id]
 
         # Search directory database directly by ID or UN/LOCODE
         db_port = self.directory_client.get_port_by_id(port_id)
@@ -181,28 +157,6 @@ class PortService:
                 db.refresh(db_port)
                 return self._enrich_with_wpi(db_port.to_pydantic())
 
-        # If it's a default global port, persist a user-specific preference
-        if port_id in self._default_ports:
-            dp = self._default_ports[port_id]
-            with get_db_context() as db:
-                db_port = MonitoredPort(
-                    id=dp.id,
-                    user_id=user_id,
-                    name=dp.name,
-                    locode=dp.locode,
-                    country=dp.country,
-                    lat=dp.lat,
-                    lon=dp.lon,
-                    is_default=True,
-                    geofence_radius_nm=dp.geofenceRadiusNm or 8.0,
-                    vessel_class="neoPanamax",
-                    notifications_enabled=notifications_enabled,
-                )
-                db.add(db_port)
-                db.commit()
-                db.refresh(db_port)
-                return self._enrich_with_wpi(db_port.to_pydantic())
-
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Port with ID '{port_id}' not found in user's monitored list.",
@@ -224,17 +178,11 @@ class PortService:
                 try:
                     from app.clients.ais_stream_manager import get_stream_manager
                     still_monitored = db.query(MonitoredPort).filter(MonitoredPort.locode == locode).first()
-                    is_default = any(dp.locode.upper() == locode.upper() for dp in self._default_ports.values())
-                    if not still_monitored and not is_default:
+                    if not still_monitored:
                         get_stream_manager().unregister_port(port_id, locode)
                 except Exception as e:
                     logger.debug("Stream manager unregister: %s", str(e))
                 return
-
-        # If it is a default port, hide it for this user
-        if port_id in self._default_ports:
-            self._removed_defaults.setdefault(user_id, set()).add(port_id)
-            return
 
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
