@@ -497,18 +497,21 @@ class AISClient:
                 raise ValueError(f"Coordinates unavailable for port '{locode}' ({port_id}).")
             lat, lon = port_obj.lat, port_obj.lon
 
-        # 4. Query AISStream live WebSocket
+        # 4. Query live vessel counts from persistent stream manager (instant in-memory lookup)
+        from app.clients.ais_stream_manager import get_stream_manager
+        stream_mgr = get_stream_manager()
+        ws_counts = stream_mgr.get_port_counts(port_id=port_id, locode=locode)
+
         effective_radius = geofence_radius_nm
         if locode == "MOMFM" or port_id == "port-momfm":
             effective_radius = max(effective_radius, 25.0)
 
-        ws_counts: Optional[Tuple[int, int, int]] = None
-        if self.api_key and self.api_key.strip():
+        if ws_counts is None and self.api_key and self.api_key.strip():
             coord_key = (round(lat, 2), round(lon, 2))
             if coord_key in self._live_vessel_cache and (now - self._live_vessel_cache[coord_key][0] < 30.0):
                 ws_counts = self._live_vessel_cache[coord_key][1]
             else:
-                ws_counts = await self._query_aisstream_ws(lat, lon, effective_radius, sample_seconds=20.0)
+                ws_counts = await self._query_aisstream_ws(lat, lon, effective_radius, sample_seconds=5.0)
                 if ws_counts is not None:
                     self._live_vessel_cache[coord_key] = (now, ws_counts)
 

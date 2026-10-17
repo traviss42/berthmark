@@ -172,3 +172,12 @@ export interface RiskThresholds {
   };
 }
 
+export interface StreamStatus {
+  isWarmingUp: boolean;
+  warmupSecondsRemaining: number;
+  message: string;
+  isConnected: boolean;
+  portsMonitored: number;
+  vesselsTracked: number;
+}
+

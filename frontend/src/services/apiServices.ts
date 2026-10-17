@@ -6,12 +6,14 @@ import type {
   RiskTier,
   User,
   AuthResponse,
+  StreamStatus,
 } from '@/types';
 import type {
   IPortService,
   IRiskService,
   INotificationService,
   IAuthService,
+  ISystemService,
   IServices,
 } from '@/services/interfaces';
 
@@ -344,11 +346,24 @@ export class ApiAuthService implements IAuthService {
   }
 }
 
+export class ApiSystemService implements ISystemService {
+  constructor(private baseUrl?: string) {}
+
+  async getStreamStatus(): Promise<StreamStatus> {
+    return request<StreamStatus>(
+      '/api/v1/system/stream-status',
+      { method: 'GET' },
+      this.baseUrl
+    );
+  }
+}
+
 export function createApiServices(baseUrl?: string): IServices {
   return {
     ports: new ApiPortService(baseUrl),
     risk: new ApiRiskService(baseUrl),
     notifications: new ApiNotificationService(baseUrl),
     auth: new ApiAuthService(baseUrl),
+    system: new ApiSystemService(baseUrl),
   };
 }

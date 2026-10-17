@@ -7,21 +7,13 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.clients.ais_client import AISClient
+from app.clients.ais_client import AISClient
+from app.clients.ais_stream_manager import get_stream_manager
 from app.clients.weather_client import MarineWeatherClient
 from app.db.models import MonitoredPort
 from app.db.session import get_db_context
 
 logger = logging.getLogger(__name__)
-
-# Default major maritime hubs used for baseline ingestion if no user ports exist
-DEFAULT_INGESTION_HUBS = [
-    {"id": "port-nlrtm", "name": "Port of Rotterdam", "locode": "NLRTM", "lat": 51.9167, "lon": 4.4},
-    {"id": "port-sgkep", "name": "Port of Keppel", "locode": "SGKEP", "lat": 1.2667, "lon": 103.8333},
-    {"id": "port-cnsgh", "name": "Port of Shanghai", "locode": "CNSGH", "lat": 31.2333, "lon": 121.4667},
-    {"id": "port-deham", "name": "Port of Hamburg", "locode": "DEHAM", "lat": 53.55, "lon": 9.9833},
-    {"id": "port-uslax", "name": "Port of Los Angeles", "locode": "USLAX", "lat": 33.7333, "lon": -118.2667},
-    {"id": "port-momfm", "name": "Port of Macau", "locode": "MOMFM", "lat": 22.2, "lon": 113.5333, "geofence": 25.0},
-]
 
 INGESTION_VESSEL_CLASSES = ["neoPanamax", "panamax", "feeder"]
 
@@ -30,12 +22,9 @@ _weather_client = MarineWeatherClient()
 _ais_client = AISClient()
 
 
-async def run_ingestion_cycle() -> Dict[str, Any]:
-    """Execute a single ingestion cycle to fetch and persist external API data into SQLite."""
-    logger.info("Starting background ingestion cycle for external weather and AIS telemetry...")
+def get_monitored_ports_for_ingestion() -> List[Dict[str, Any]]:
+    """Gather all user-monitored ports from the database (no default hubs)."""
     ports_to_ingest: List[Dict[str, Any]] = []
-
-    # 1. Gather all user-monitored ports from the database
     try:
         with get_db_context() as db:
             monitored = db.query(MonitoredPort).all()
@@ -51,39 +40,39 @@ async def run_ingestion_cycle() -> Dict[str, Any]:
                 })
     except Exception as e:
         logger.warning("Failed to query monitored ports for ingestion: %s", str(e))
+    return ports_to_ingest
 
-    # 2. Add default hubs if not already present
-    existing_locodes = {p["locode"] for p in ports_to_ingest}
-    for hub in DEFAULT_INGESTION_HUBS:
-        if hub["locode"] not in existing_locodes:
-            ports_to_ingest.append({
-                "id": hub["id"],
-                "name": hub["name"],
-                "locode": hub["locode"],
-                "lat": hub["lat"],
-                "lon": hub["lon"],
-                "geofence": 8.0,
-                "vessel_class": "neoPanamax",
-            })
 
-    # 3. Deduplicate unique ports for concurrent batch AISStream sampling
-    unique_ports_map: Dict[str, Dict[str, Any]] = {}
-    for p in ports_to_ingest:
-        key = p.get("locode") or p.get("id")
-        if key not in unique_ports_map:
-            unique_ports_map[key] = p
-    unique_ports = list(unique_ports_map.values())
+async def initialize_startup_stream(warmup_seconds: float = 20.0) -> None:
+    """Initialize persistent AISStream WebSocket listener and execute warm-up initialization."""
+    ports = get_monitored_ports_for_ingestion()
+    stream_mgr = get_stream_manager()
+    await stream_mgr.start(ports, warmup_seconds=warmup_seconds)
 
-    # Concurrently sample live AISStream traffic for all bounding boxes in one connection
-    try:
-        logger.info(
-            "Batch querying AISStream WebSocket with %d bounding boxes...",
-            len(unique_ports),
-        )
-        batch_counts = await _ais_client.batch_query_ports_ws(unique_ports, sample_seconds=20.0)
-        logger.info("Batch AISStream query returned data for %d ports.", len(batch_counts))
-    except Exception as e:
-        logger.warning("Batch AISStream query failed, falling back to per-port lookup: %s", str(e))
+    if stream_mgr.is_warming_up:
+        logger.info("Stream warm-up active: waiting %.1fs for initial fleet aggregation...", warmup_seconds)
+        while stream_mgr.is_warming_up:
+            await asyncio.sleep(1.0)
+        logger.info("Stream warm-up complete. Flushing initial baseline snapshot to SQLite...")
+        try:
+            await run_ingestion_cycle()
+        except Exception as e:
+            logger.warning("Initial snapshot flush encountered error: %s", str(e))
+
+
+async def run_ingestion_cycle() -> Dict[str, Any]:
+    """Execute a single ingestion cycle to fetch and persist external API data into SQLite."""
+    logger.info("Starting background ingestion cycle for external weather and AIS telemetry...")
+    ports_to_ingest = get_monitored_ports_for_ingestion()
+    if not ports_to_ingest:
+        logger.info("No monitored ports found in database; ingestion idle.")
+        return {
+            "status": "idle",
+            "ports_processed": 0,
+            "weather_records_updated": 0,
+            "ais_records_updated": 0,
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+        }
 
     weather_updated = 0
     ais_updated = 0
@@ -186,16 +175,37 @@ def start_ingestion_scheduler(interval_minutes: int = 30) -> AsyncIOScheduler:
             scheduler.start()
             logger.info("APScheduler background ingestion service started.")
 
+    # Spawn persistent AISStream manager startup and warm-up task
+    try:
+        import asyncio
+        loop = asyncio.get_running_loop()
+        loop.create_task(initialize_startup_stream(warmup_seconds=20.0))
+        logger.info("Spawned AISStream persistent stream initialization and 20s warm-up task.")
+    except RuntimeError:
+        pass
+
     return scheduler
 
 
 def stop_ingestion_scheduler() -> None:
-    """Stop the APScheduler background ingestion job."""
+    """Stop the APScheduler background ingestion job and stream manager."""
     global _scheduler
     if _scheduler is not None and _scheduler.running:
         _scheduler.shutdown(wait=False)
         logger.info("APScheduler background ingestion service stopped.")
         _scheduler = None
+
+    try:
+        from app.clients.ais_stream_manager import get_stream_manager
+        stream_mgr = get_stream_manager()
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(stream_mgr.stop())
+        except RuntimeError:
+            asyncio.run(stream_mgr.stop())
+    except Exception as e:
+        logger.debug("Stream manager stop on shutdown: %s", str(e))
 
 
 def is_ingestion_running() -> bool:

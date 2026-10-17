@@ -67,6 +67,13 @@ async def health_check():
     return {"status": "ok", "version": "1.0.0", "environment": settings.ENVIRONMENT}
 
 
+@app.get("/api/v1/system/stream-status", tags=["System"])
+async def get_stream_status():
+    """Return live AISStream manager status, warm-up state, and message."""
+    from app.clients.ais_stream_manager import get_stream_manager
+    return get_stream_manager().get_status()
+
+
 @app.get("/api/v1/system/diagnostics", tags=["System"])
 async def run_diagnostics():
     """Live diagnostic check verifying connectivity and auth to UN/LOCODE DB, Open-Meteo, and AISStream."""

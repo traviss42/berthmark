@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   Bell,
   Globe,
@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import type { VesselClass, User, Port } from '@/types';
 import { getVesselClassInfo } from '@/data/vesselTaxonomy';
-import { usePorts, useRiskAssessments, useNotifications } from '@/hooks/useServices';
+import { usePorts, useRiskAssessments, useNotifications, useStreamStatus } from '@/hooks/useServices';
 import { useAuth } from '@/context/AuthContext';
 import { LoginScreen } from '@/components/LoginScreen';
 import { PortList } from '@/components/PortList';
@@ -73,6 +73,15 @@ function Dashboard({ user }: { user: User }) {
     markAllAsRead,
     refresh: refreshNotifications,
   } = useNotifications(user.email);
+
+  const { status: streamStatus } = useStreamStatus();
+
+  // Auto-refresh risk assessments when warm-up completes
+  useEffect(() => {
+    if (streamStatus && !streamStatus.isWarmingUp) {
+      refreshRisk();
+    }
+  }, [streamStatus?.isWarmingUp, refreshRisk]);
 
   const assessmentMap = useMemo(() => {
     const map = new Map();
@@ -256,6 +265,26 @@ function Dashboard({ user }: { user: User }) {
 
       {/* Main content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {/* AISStream Warm-up Initialization Banner */}
+        {streamStatus?.isWarmingUp && (
+          <div className="mb-6 rounded-xl bg-blue-50 border border-blue-200 p-4 flex items-center justify-between shadow-sm animate-pulse">
+            <div className="flex items-center gap-3">
+              <RefreshCw className="w-5 h-5 text-blue-600 animate-spin flex-shrink-0" />
+              <div>
+                <h4 className="text-sm font-semibold text-blue-950">
+                  Initializing live AIS vessel data...
+                </h4>
+                <p className="text-xs text-blue-800 mt-0.5">
+                  Aggregating real-time fleet broadcasts across monitored ports ({streamStatus.warmupSecondsRemaining}s remaining).
+                </p>
+              </div>
+            </div>
+            <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-full bg-blue-200/80 text-blue-900 flex-shrink-0">
+              {streamStatus.warmupSecondsRemaining}s
+            </span>
+          </div>
+        )}
+
         {/* Demo Account In-App Notice Banner */}
         {isDemoAccount(user.email) && (
           <div className="mb-6 rounded-xl bg-amber-50 border border-amber-200 p-4 flex items-start gap-3.5 shadow-sm">

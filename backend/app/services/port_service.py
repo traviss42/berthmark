@@ -129,6 +129,21 @@ class PortService:
             db.add(db_port)
             db.commit()
             db.refresh(db_port)
+
+            try:
+                from app.clients.ais_stream_manager import get_stream_manager
+                get_stream_manager().register_ports([{
+                    "id": db_port.id,
+                    "locode": db_port.locode,
+                    "name": db_port.name,
+                    "lat": db_port.lat,
+                    "lon": db_port.lon,
+                    "geofence": db_port.geofence_radius_nm,
+                    "vessel_class": db_port.vessel_class,
+                }])
+            except Exception as e:
+                logger.debug("Stream manager registration: %s", str(e))
+
             return db_port.to_pydantic()
 
     async def update_port_notifications(
@@ -166,8 +181,17 @@ class PortService:
                     detail=f"Port with ID '{port_id}' not found in user's monitored list.",
                 )
 
+            locode = db_port.locode
             db.delete(db_port)
             db.commit()
+
+            try:
+                from app.clients.ais_stream_manager import get_stream_manager
+                still_monitored = db.query(MonitoredPort).filter(MonitoredPort.locode == locode).first()
+                if not still_monitored:
+                    get_stream_manager().unregister_port(port_id, locode)
+            except Exception as e:
+                logger.debug("Stream manager unregister: %s", str(e))
 
 
 # Singleton instance for the application

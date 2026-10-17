@@ -5,6 +5,7 @@ import type {
   VesselClass,
   User,
   AuthResponse,
+  StreamStatus,
 } from '@/types';
 
 // ── Service interfaces ──
@@ -57,9 +58,14 @@ export interface IAuthService {
   logout(): Promise<void>;
 }
 
+export interface ISystemService {
+  getStreamStatus(): Promise<StreamStatus>;
+}
+
 export interface IServices {
   ports: IPortService;
   risk: IRiskService;
   notifications: INotificationService;
   auth: IAuthService;
+  system: ISystemService;
 }

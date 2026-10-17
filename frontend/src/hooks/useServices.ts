@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { Port, VesselClass, RiskAssessment, Notification } from '@/types';
+import type { Port, VesselClass, RiskAssessment, Notification, StreamStatus } from '@/types';
 import { getServices } from '@/services';
 
 const MOCK_USER_ID = 'mock-user';
@@ -140,4 +140,31 @@ export function useNotifications(userId: string = MOCK_USER_ID) {
   const unreadCount = notifications.filter((n) => !n.read).length;
 
   return { notifications, loading, unreadCount, refresh, markAsRead, markAllAsRead };
+}
+
+export function useStreamStatus() {
+  const [status, setStatus] = useState<StreamStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const services = getServices();
+
+  const refresh = useCallback(async () => {
+    try {
+      const data = await services.system.getStreamStatus();
+      setStatus(data);
+    } catch {
+      // silent on network error
+    } finally {
+      setLoading(false);
+    }
+  }, [services]);
+
+  useEffect(() => {
+    refresh();
+    const interval = setInterval(() => {
+      refresh();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [refresh]);
+
+  return { status, loading, refresh };
 }
