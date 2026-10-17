@@ -48,15 +48,15 @@ class AISStreamManager:
         # Live vessel tracking: port_key -> { mmsi -> {sog, lat, lon, last_seen, nav_status} }
         self._vessels: Dict[str, Dict[int, Dict[str, Any]]] = {}
 
-        # Connection and lifecycle state
+        # Connection and lifecycle state for 3 concurrent WebSocket workers
         self._running: bool = False
-        self._is_connected: bool = False
+        self._worker_connected: Dict[int, bool] = {i: False for i in range(3)}
         self._is_warming_up: bool = False
         self._warmup_start_time: float = 0.0
         self._warmup_duration_sec: float = 20.0
         self._warmup_task: Optional[asyncio.Task] = None
-        self._listen_task: Optional[asyncio.Task] = None
-        self._resubscribe_event: asyncio.Event = asyncio.Event()
+        self._listen_tasks: List[asyncio.Task] = []
+        self._resubscribe_events: List[asyncio.Event] = [asyncio.Event() for _ in range(3)]
 
     @property
     def is_warming_up(self) -> bool:
@@ -77,7 +77,7 @@ class AISStreamManager:
 
     @property
     def is_connected(self) -> bool:
-        return self._is_connected
+        return any(self._worker_connected.values())
 
     @property
     def ports_monitored_count(self) -> int:
@@ -139,7 +139,8 @@ class AISStreamManager:
             if p.get("locode") and p["locode"].upper() not in self._vessels:
                 self._vessels[p["locode"].upper()] = self._vessels[key]
 
-        self._resubscribe_event.set()
+        for ev in self._resubscribe_events:
+            ev.set()
 
         # If stream is running and transitioning from 0 ports to monitored ports, activate warm-up
         if self._running and was_empty and self._ports and self.api_key and self.api_key.strip():
@@ -156,10 +157,11 @@ class AISStreamManager:
             del self._ports[port_id]
         if locode and locode.upper() in self._ports:
             del self._ports[locode.upper()]
-        self._resubscribe_event.set()
+        for ev in self._resubscribe_events:
+            ev.set()
 
     async def start(self, initial_ports: List[Dict[str, Any]], warmup_seconds: float = 20.0) -> None:
-        """Start the persistent WebSocket listener and initialize the warm-up cycle."""
+        """Start the persistent WebSocket listeners across 3 connections and initialize the warm-up cycle."""
         if self._running:
             return
 
@@ -172,7 +174,7 @@ class AISStreamManager:
             self._warmup_start_time = time.time()
             self._warmup_duration_sec = warmup_seconds
             logger.info(
-                "Starting AISStream persistent stream with %d monitored ports. Warm-up initialization for %.1fs...",
+                "Starting AISStream persistent stream across 3 connections with %d monitored ports. Warm-up initialization for %.1fs...",
                 self.ports_monitored_count,
                 warmup_seconds,
             )
@@ -180,20 +182,23 @@ class AISStreamManager:
             self._is_warming_up = False
             logger.info("Starting AISStream persistent stream (no monitored ports or API key yet).")
 
-        self._listen_task = asyncio.create_task(self._listen_loop())
+        self._listen_tasks = [
+            asyncio.create_task(self._listen_worker(i, 3))
+            for i in range(3)
+        ]
 
     async def stop(self) -> None:
-        """Stop the background listener and clean up resources."""
+        """Stop all background listeners and clean up resources."""
         self._running = False
-        self._is_connected = False
+        self._worker_connected = {i: False for i in range(3)}
         self._is_warming_up = False
-        if self._listen_task:
-            self._listen_task.cancel()
+        for task in self._listen_tasks:
+            task.cancel()
             try:
-                await self._listen_task
+                await task
             except asyncio.CancelledError:
                 pass
-            self._listen_task = None
+        self._listen_tasks.clear()
         logger.info("AISStream persistent background stream stopped.")
 
     def get_port_counts(self, port_id: str, locode: Optional[str] = None) -> Optional[Tuple[int, int, int]]:
@@ -237,15 +242,19 @@ class AISStreamManager:
                 if warming
                 else "Live AIS vessel telemetry active"
             ),
-            "isConnected": self._is_connected,
+            "isConnected": self.is_connected,
             "portsMonitored": self.ports_monitored_count,
             "vesselsTracked": self.total_vessels_tracked,
         }
 
-    async def _listen_loop(self) -> None:
-        """Continuous background listener that maintains an open WebSocket to AISStream."""
+    async def _listen_worker(self, worker_id: int, total_workers: int = 3) -> None:
+        """Continuous background listener worker maintaining an open WebSocket for 1/Nth of the ports."""
         backoff_delay = 2.0
         max_backoff = 30.0
+        event = self._resubscribe_events[worker_id]
+        # Stagger initial connection handshakes so workers do not connect at the exact same millisecond
+        if worker_id > 0:
+            await asyncio.sleep(worker_id * 1.5)
 
         while self._running:
             if not self.api_key or not self.api_key.strip():
@@ -253,18 +262,23 @@ class AISStreamManager:
                 await asyncio.sleep(5.0)
                 continue
 
-            unique_ports = {p["id"]: p for p in self._ports.values()}
-            if not unique_ports:
-                # No ports monitored; wait until a port is registered
+            unique_ports = sorted(
+                list({p["id"]: p for p in self._ports.values()}.values()),
+                key=lambda x: x["id"],
+            )
+            worker_ports = [p for idx, p in enumerate(unique_ports) if idx % total_workers == worker_id]
+
+            if not worker_ports:
+                # No ports assigned to this worker; wait until ports are registered
                 try:
-                    await asyncio.wait_for(self._resubscribe_event.wait(), timeout=10.0)
-                    self._resubscribe_event.clear()
+                    await asyncio.wait_for(event.wait(), timeout=10.0)
+                    event.clear()
                 except asyncio.TimeoutError:
                     pass
                 continue
 
-            # Build bounding box subscription list
-            bboxes = [p["bbox"] for p in unique_ports.values()]
+            # Build bounding box subscription list for this worker's partition
+            bboxes = [p["bbox"] for p in worker_ports]
             sub_payload = {
                 "APIKey": self.api_key.strip(),
                 "BoundingBoxes": bboxes,
@@ -273,7 +287,9 @@ class AISStreamManager:
 
             try:
                 logger.info(
-                    "Connecting persistent AISStream WebSocket with %d port bounding boxes...",
+                    "Worker %d/%d: Connecting persistent AISStream WebSocket with %d port bounding boxes...",
+                    worker_id + 1,
+                    total_workers,
                     len(bboxes),
                 )
                 async with websockets.connect(
@@ -283,34 +299,46 @@ class AISStreamManager:
                     ping_interval=20.0,
                 ) as ws:
                     await ws.send(json.dumps(sub_payload))
-                    self._is_connected = True
+                    self._worker_connected[worker_id] = True
                     backoff_delay = 2.0
-                    logger.info("Persistent AISStream WebSocket connected successfully.")
+                    logger.info(
+                        "Worker %d/%d: Persistent AISStream WebSocket connected successfully.",
+                        worker_id + 1,
+                        total_workers,
+                    )
 
                     last_prune_time = time.time()
 
                     while self._running:
                         # Check if monitored ports changed and we need to re-subscribe
-                        if self._resubscribe_event.is_set():
-                            self._resubscribe_event.clear()
-                            updated_ports = {p["id"]: p for p in self._ports.values()}
-                            if updated_ports:
+                        if event.is_set():
+                            event.clear()
+                            fresh_unique = sorted(
+                                list({p["id"]: p for p in self._ports.values()}.values()),
+                                key=lambda x: x["id"],
+                            )
+                            fresh_worker_ports = [
+                                p for idx, p in enumerate(fresh_unique) if idx % total_workers == worker_id
+                            ]
+                            if fresh_worker_ports:
                                 new_sub = {
                                     "APIKey": self.api_key.strip(),
-                                    "BoundingBoxes": [p["bbox"] for p in updated_ports.values()],
+                                    "BoundingBoxes": [p["bbox"] for p in fresh_worker_ports],
                                     "FilterMessageTypes": ["PositionReport", "ShipStaticData"],
                                 }
                                 await ws.send(json.dumps(new_sub))
                                 logger.info(
-                                    "Sent updated AISStream subscription with %d bounding boxes.",
+                                    "Worker %d/%d: Sent updated subscription with %d bounding boxes.",
+                                    worker_id + 1,
+                                    total_workers,
                                     len(new_sub["BoundingBoxes"]),
                                 )
 
                         try:
                             raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
                         except asyncio.TimeoutError:
-                            # Periodic check for departed vessel pruning (every 60s)
-                            if time.time() - last_prune_time > 60.0:
+                            # Periodic check for departed vessel pruning on worker 0 (every 60s)
+                            if worker_id == 0 and time.time() - last_prune_time > 60.0:
                                 self._prune_departed_vessels()
                                 last_prune_time = time.time()
                             continue
@@ -320,16 +348,18 @@ class AISStreamManager:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                self._is_connected = False
+                self._worker_connected[worker_id] = False
                 logger.warning(
-                    "AISStream persistent WebSocket dropped: %s. Reconnecting in %.1fs...",
+                    "Worker %d/%d: AISStream WebSocket dropped: %s. Reconnecting in %.1fs...",
+                    worker_id + 1,
+                    total_workers,
                     str(e),
                     backoff_delay,
                 )
                 await asyncio.sleep(backoff_delay)
                 backoff_delay = min(backoff_delay * 1.5, max_backoff)
 
-        self._is_connected = False
+        self._worker_connected[worker_id] = False
 
     def _process_raw_message(self, raw_str: str) -> None:
         """Parse incoming AISStream JSON message and update in-memory vessel registry."""

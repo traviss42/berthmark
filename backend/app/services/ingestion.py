@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
@@ -78,6 +78,7 @@ def flush_stream_snapshot_to_cache() -> int:
     """Flush tracked vessel metrics from in-memory stream manager to SQLite ExternalAISTrafficCache."""
     stream_mgr = get_stream_manager()
     persisted = 0
+    seen_port_ids: Set[str] = set()
     now_utc = datetime.now(timezone.utc)
     try:
         from app.clients.unlocode_db import UnlocodeDatabase
@@ -94,6 +95,10 @@ def flush_stream_snapshot_to_cache() -> int:
                 port = db_ref.get_port_by_id(port_key) or db_ref.get_port_by_locode(port_key)
                 if not port or port.channelDepthM is None or port.channelDepthM <= 0:
                     continue
+                if port.id in seen_port_ids:
+                    continue
+                seen_port_ids.add(port.id)
+
                 cache_key = f"{port.id}:neoPanamax"
                 rec = db.query(ExternalAISTrafficCache).filter(
                     (ExternalAISTrafficCache.id == cache_key)
