@@ -79,3 +79,10 @@ clean: ## Remove temporary cache and build artifacts
 	@echo "==> Cleaning cache and build artifacts..."
 	@rm -rf backend/.pytest_cache frontend/node_modules/.vite frontend/dist
 	@find backend -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+
+reset-db: ## Delete user database and telemetry caches to start with a blank slate (unlocode.db preserved)
+	@echo "==> Resetting Berthmark database..."
+	@rm -f backend/data/berthmark.db
+	@echo "==> Database removed. Restart backend to initialize a fresh, empty database."
+
+clean-all: clean reset-db ## Remove build artifacts, caches, and user database for a completely blank slate

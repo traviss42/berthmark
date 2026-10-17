@@ -127,3 +127,23 @@ def test_stream_manager_departed_vessel_timeout():
     mgr._prune_departed_vessels()
     assert 111 in mgr._vessels["port-nlrtm"]
     assert 222 not in mgr._vessels["port-nlrtm"]
+
+
+def test_register_first_port_triggers_warmup_when_running():
+    """Verify that adding the first port to a running stream manager triggers the 20-second warm-up."""
+    mgr = AISStreamManager(api_key="mock-key")
+    mgr._running = True  # Simulates backend server running
+    assert mgr.is_warming_up is False
+    assert mgr.ports_monitored_count == 0
+
+    # User adds their first port on a clean slate
+    mgr.register_ports([
+        {"id": "port-nlrtm", "locode": "NLRTM", "lat": 51.92, "lon": 4.48, "geofence": 8.0},
+    ])
+
+    assert mgr.is_warming_up is True
+    assert 19 <= mgr.warmup_seconds_remaining <= 20
+    status = mgr.get_status()
+    assert status["isWarmingUp"] is True
+    assert "Initializing live AIS vessel telemetry" in status["message"]
+

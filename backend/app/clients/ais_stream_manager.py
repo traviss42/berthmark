@@ -96,6 +96,8 @@ class AISStreamManager:
 
     def register_ports(self, ports: List[Dict[str, Any]]) -> None:
         """Register or update a list of monitored ports and their geofences."""
+        was_empty = len(self._ports) == 0
+
         for p in ports:
             key = p.get("id") or p.get("locode")
             if not key:
@@ -138,6 +140,15 @@ class AISStreamManager:
                 self._vessels[p["locode"].upper()] = self._vessels[key]
 
         self._resubscribe_event.set()
+
+        # If stream is running and transitioning from 0 ports to monitored ports, activate warm-up
+        if self._running and was_empty and self._ports and self.api_key and self.api_key.strip():
+            self._is_warming_up = True
+            self._warmup_start_time = time.time()
+            self._warmup_duration_sec = 20.0
+            logger.info(
+                "First monitored port registered to live AIS stream. Initiating 20.0s warm-up aggregation..."
+            )
 
     def unregister_port(self, port_id: str, locode: Optional[str] = None) -> None:
         """Remove a port from continuous monitoring."""
