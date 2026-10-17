@@ -1,5 +1,6 @@
 """Background ingestion service utilizing APScheduler to periodically fetch and update external data in SQLite."""
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -190,7 +191,6 @@ def start_ingestion_scheduler(interval_minutes: int = 30) -> AsyncIOScheduler:
             scheduler.start()
             logger.info("APScheduler background ingestion service started.")
         except RuntimeError:
-            import asyncio
             try:
                 loop = asyncio.get_event_loop()
             except RuntimeError:
@@ -202,7 +202,6 @@ def start_ingestion_scheduler(interval_minutes: int = 30) -> AsyncIOScheduler:
 
     # Spawn persistent AISStream manager startup and warm-up task
     try:
-        import asyncio
         loop = asyncio.get_running_loop()
         loop.create_task(initialize_startup_stream(warmup_seconds=20.0))
         logger.info("Spawned AISStream persistent stream initialization and 20s warm-up task.")
@@ -223,7 +222,6 @@ def stop_ingestion_scheduler() -> None:
     try:
         from app.clients.ais_stream_manager import get_stream_manager
         stream_mgr = get_stream_manager()
-        import asyncio
         try:
             loop = asyncio.get_running_loop()
             loop.create_task(stream_mgr.stop())
