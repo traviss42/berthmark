@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -31,6 +32,9 @@ class Port(Base):
     """Port entity storing physical channel depths and geospatial location."""
 
     __tablename__ = "ports"
+    __table_args__ = (
+        Index("ix_ports_country_subdivision", "country_code", "subdivision_code"),
+    )
 
     unlocode: Mapped[str] = mapped_column(String(5), primary_key=True)
     port_name: Mapped[str] = mapped_column(String(100), nullable=False)
