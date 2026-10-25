@@ -934,6 +934,11 @@ components:
           nullable: true
           description: ID of user who added this custom port, or null for default ports.
           example: null
+        vesselClass:
+          type: string
+          nullable: true
+          description: Subscribed vessel class for this port.
+          example: neoPanamax
 
     PortCreate:
       type: object
@@ -981,6 +986,10 @@ components:
           maximum: 50
           description: Geofence radius in nautical miles.
           example: 8.0
+        vesselClass:
+          type: string
+          description: Optional vessel class subscription.
+          example: neoPanamax
 
     CongestionMetrics:
       type: object

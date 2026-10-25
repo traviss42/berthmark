@@ -7,7 +7,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from backend.models import Port, UserWatchlist
+from backend.models import Port, UserWatchlist, VesselClass
 from backend.ports.schemas import PortCreate, PortResponse
 
 # Canonical country code to country name mapping for common maritime jurisdictions
@@ -251,6 +251,7 @@ async def get_user_monitored_ports(
                 isDefault=False,
                 geofenceRadiusNm=float(uw.geofence_radius_nm) if uw.geofence_radius_nm is not None else 8.0,
                 addedByUserId=str(user_id),
+                vesselClass=uw.vessel_class_id,
             )
         )
 
@@ -263,10 +264,18 @@ async def add_user_watchlist_port(
     """Add a custom monitored port to the authenticated user's watchlist."""
     locode_clean = port_data.locode.strip().upper()
 
-    # Check if this port is already in the user's watchlist
+    vessel_class_input = (port_data.vesselClass or "panamax").strip()
+    vc_result = await session.execute(
+        select(VesselClass).where(func.lower(VesselClass.class_id) == vessel_class_input.lower())
+    )
+    matched_vc = vc_result.scalar_one_or_none()
+    effective_vc_id = matched_vc.class_id if matched_vc else vessel_class_input
+
+    # Check if this (port, vessel_class) pair is already in the user's watchlist
     stmt = select(UserWatchlist).where(
         UserWatchlist.user_id == user_id,
         UserWatchlist.unlocode == locode_clean,
+        UserWatchlist.vessel_class_id == effective_vc_id,
     )
     existing_entry = (await session.execute(stmt)).scalar_one_or_none()
     if existing_entry:
@@ -274,7 +283,9 @@ async def add_user_watchlist_port(
             status_code=status.HTTP_409_CONFLICT,
             detail={
                 "error": "Conflict",
-                "message": f"Port with LOCODE '{locode_clean}' is already in your watchlist.",
+                "message": f"Port with LOCODE '{locode_clean}' is already in your watchlist."
+                if not port_data.vesselClass
+                else f"Port with LOCODE '{locode_clean}' and vessel class '{effective_vc_id}' is already in your watchlist.",
                 "statusCode": 409,
             },
         )
@@ -305,7 +316,7 @@ async def add_user_watchlist_port(
         watchlist_id=new_watchlist_id,
         user_id=user_id,
         unlocode=locode_clean,
-        vessel_class_id="panamax",
+        vessel_class_id=effective_vc_id,
         geofence_radius_nm=port_data.geofenceRadiusNm,
     )
     session.add(watchlist_entry)
@@ -321,6 +332,7 @@ async def add_user_watchlist_port(
         isDefault=False,
         geofenceRadiusNm=port_data.geofenceRadiusNm,
         addedByUserId=str(user_id),
+        vesselClass=effective_vc_id,
     )
 
 

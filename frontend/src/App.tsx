@@ -250,7 +250,7 @@ function AppContent() {
           </div>
         )}
 
-        {selectedAssessment && selectedPort ? (
+        {selectedAssessment && selectedPort && viewMode !== 'map' ? (
           <PortRiskDetail
             assessment={selectedAssessment}
             onBack={() => setSelectedPortId(null)}

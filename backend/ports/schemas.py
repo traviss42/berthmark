@@ -18,6 +18,7 @@ class PortResponse(BaseModel):
     isDefault: bool = Field(default=False, alias="isDefault")
     geofenceRadiusNm: float = Field(default=8.0, alias="geofenceRadiusNm")
     addedByUserId: str | None = Field(default=None, alias="addedByUserId")
+    vesselClass: str | None = Field(default=None, alias="vesselClass")
 
 
 class PortCreate(BaseModel):
@@ -33,6 +34,7 @@ class PortCreate(BaseModel):
     geofenceRadiusNm: float = Field(
         default=8.0, ge=1.0, le=50.0, alias="geofenceRadiusNm", description="Geofence radius in nautical miles."
     )
+    vesselClass: str | None = Field(default=None, alias="vesselClass")
 
     @field_validator("name", "country")
     @classmethod
