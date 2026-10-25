@@ -2,6 +2,7 @@ import { ArrowLeft, MapPin, Trash2, RefreshCw, Wind, Waves, Eye, Compass, Anchor
 import type { RiskAssessment } from '@/types';
 import { RiskBadge } from './RiskBadge';
 import { SubRiskBreakdown } from './SubRiskBreakdown';
+import { AlternativePortDiversion } from './AlternativePortDiversion';
 import { TIER_COLORS, formatTimestamp } from '@/utils/riskDisplay';
 
 interface Props {
@@ -79,6 +80,12 @@ export function PortRiskDetail({ assessment, onBack, onRemove, canRemove, onRefr
           </div>
         </div>
       </div>
+
+      {/* Inline Alternative Port Diversions (High/Critical risk only) */}
+      <AlternativePortDiversion
+        compositeTier={assessment.compositeTier}
+        alternatives={assessment.alternatives}
+      />
 
       {/* Sub-Risk Breakdown */}
       <div>

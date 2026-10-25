@@ -19,6 +19,7 @@ import {
   TIER_COLORS,
   TIER_LABELS,
 } from '@/utils/riskDisplay';
+import { AlternativePortDiversion } from './AlternativePortDiversion';
 
 export interface PortCardProps {
   port: Port;
@@ -292,6 +293,12 @@ export const PortCard: React.FC<PortCardProps> = ({
             </div>
           </div>
         </div>
+
+        {/* ── Inline Alternative Port Diversions (High Risk only) ── */}
+        <AlternativePortDiversion
+          compositeTier={tier}
+          alternatives={assessment?.alternatives}
+        />
       </div>
 
       {/* ── Direct Footer / Link ── */}

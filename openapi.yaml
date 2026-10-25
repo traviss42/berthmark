@@ -1250,6 +1250,63 @@ components:
               $ref: '#/components/schemas/SubRiskResult'
         metrics:
           $ref: '#/components/schemas/PortMetrics'
+        alternatives:
+          type: array
+          description: Recommended alternative diversion ports when composite risk is High or Critical.
+          items:
+            $ref: '#/components/schemas/AlternativePortRecommendation'
+
+    AlternativePortRecommendation:
+      type: object
+      required:
+        - portId
+        - unlocode
+        - portName
+        - country
+        - distanceNm
+        - channelDepthM
+        - depthMarginM
+        - swellHeightM
+        - riskTier
+      properties:
+        portId:
+          type: string
+          example: port-wilhelmshaven
+        unlocode:
+          type: string
+          example: DEWVN
+        portName:
+          type: string
+          example: Port of Wilhelmshaven
+        country:
+          type: string
+          example: Germany
+        distanceNm:
+          type: number
+          format: float
+          description: Proximity distance from primary port in nautical miles.
+          example: 140.0
+        channelDepthM:
+          type: number
+          format: float
+          description: Controlling channel depth in meters.
+          example: 18.5
+        depthMarginM:
+          type: number
+          format: float
+          description: Clearance margin relative to vessel required draft in meters.
+          example: 3.0
+        swellHeightM:
+          type: number
+          format: float
+          description: Significant wave/swell height in meters.
+          example: 1.2
+        riskTier:
+          $ref: '#/components/schemas/RiskTier'
+        trafficStatus:
+          type: string
+          description: Optional operational traffic status.
+          example: 4 anchored / 2 underway
 
     BulkRiskAssessmentRequest:
       type: object

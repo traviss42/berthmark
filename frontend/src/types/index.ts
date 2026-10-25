@@ -102,6 +102,19 @@ export interface SubRiskResult {
   factors: string[];
 }
 
+export interface AlternativePortRecommendation {
+  portId: string;
+  unlocode: string;
+  portName: string;
+  country: string;
+  distanceNm: number;
+  channelDepthM: number;
+  depthMarginM: number;
+  swellHeightM: number;
+  riskTier: RiskTier;
+  trafficStatus?: string;
+}
+
 export interface RiskAssessment {
   id: string;
   portId: string;
@@ -113,6 +126,7 @@ export interface RiskAssessment {
   compositeScore: number;
   subRisks: Record<SubRiskCategory, SubRiskResult>;
   metrics: PortMetrics;
+  alternatives?: AlternativePortRecommendation[];
 }
 
 export type NotificationType = 'stateChange' | 'dailyDigest' | 'inApp';
