@@ -1,6 +1,8 @@
 """Berthmark API server main application entry point."""
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from backend.auth.router import router as auth_router
@@ -26,6 +28,27 @@ async def custom_http_exception_handler(request: Request, exc: HTTPException):
             "error": "Error",
             "message": str(exc.detail),
             "statusCode": exc.status_code,
+        },
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def custom_validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Normalize validation errors to HTTP 400 matching OpenAPI ErrorResponse schema."""
+    if "/auth" in request.url.path:
+        return await request_validation_exception_handler(request, exc)
+
+    errors = exc.errors()
+    first_error = errors[0] if errors else {}
+    msg = first_error.get("msg", "Validation error")
+    loc = " -> ".join(str(l) for l in first_error.get("loc", []))
+    full_msg = f"{loc}: {msg}" if loc else msg
+    return JSONResponse(
+        status_code=400,
+        content={
+            "error": "Bad Request",
+            "message": full_msg,
+            "statusCode": 400,
         },
     )
 

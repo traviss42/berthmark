@@ -125,6 +125,7 @@ class UserWatchlist(Base):
     vessel_class_id: Mapped[str] = mapped_column(
         String(20), ForeignKey("vessel_classes.class_id", ondelete="CASCADE"), nullable=False
     )
+    geofence_radius_nm: Mapped[float | None] = mapped_column(Float, default=8.0, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
     )

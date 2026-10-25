@@ -1,10 +1,14 @@
-"""Service layer for port directory lookups, default benchmark ports, and search."""
+"""Service layer for port directory lookups, default benchmark ports, search, and user watchlist management."""
 
+import re
+import uuid
 from typing import Any
+from fastapi import HTTPException, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from backend.models import Port
-from backend.ports.schemas import PortResponse
+from sqlalchemy.orm import selectinload
+from backend.models import Port, UserWatchlist
+from backend.ports.schemas import PortCreate, PortResponse
 
 # Canonical country code to country name mapping for common maritime jurisdictions
 COUNTRY_NAMES: dict[str, str] = {
@@ -215,3 +219,193 @@ async def get_port_by_id(session: AsyncSession, port_id: str) -> PortResponse | 
         return port_to_response(port)
 
     return None
+
+
+async def get_user_monitored_ports(
+    session: AsyncSession, user_id: uuid.UUID
+) -> list[PortResponse]:
+    """Retrieve combined list of system default ports and user's custom watchlist ports."""
+    default_ports = await get_default_ports(session)
+
+    stmt = (
+        select(UserWatchlist)
+        .options(selectinload(UserWatchlist.port))
+        .where(UserWatchlist.user_id == user_id)
+        .order_by(UserWatchlist.created_at)
+    )
+    res = await session.execute(stmt)
+    watchlist_entries = res.scalars().all()
+
+    custom_ports: list[PortResponse] = []
+    for uw in watchlist_entries:
+        port = uw.port
+        country = COUNTRY_NAMES.get(port.country_code.upper(), port.country_code)
+        custom_ports.append(
+            PortResponse(
+                id=f"port-user-{uw.watchlist_id}",
+                name=port.port_name,
+                locode=port.unlocode.upper(),
+                country=country,
+                lat=round(float(port.latitude), 6),
+                lon=round(float(port.longitude), 6),
+                isDefault=False,
+                geofenceRadiusNm=float(uw.geofence_radius_nm) if uw.geofence_radius_nm is not None else 8.0,
+                addedByUserId=str(user_id),
+            )
+        )
+
+    return default_ports + custom_ports
+
+
+async def add_user_watchlist_port(
+    session: AsyncSession, user_id: uuid.UUID, port_data: PortCreate
+) -> PortResponse:
+    """Add a custom monitored port to the authenticated user's watchlist."""
+    locode_clean = port_data.locode.strip().upper()
+
+    # Check if this port is already in the user's watchlist
+    stmt = select(UserWatchlist).where(
+        UserWatchlist.user_id == user_id,
+        UserWatchlist.unlocode == locode_clean,
+    )
+    existing_entry = (await session.execute(stmt)).scalar_one_or_none()
+    if existing_entry:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "Conflict",
+                "message": f"Port with LOCODE '{locode_clean}' is already in your watchlist.",
+                "statusCode": 409,
+            },
+        )
+
+    # Ensure Port record exists in database
+    port_stmt = select(Port).where(Port.unlocode == locode_clean)
+    port = (await session.execute(port_stmt)).scalar_one_or_none()
+    if port is None:
+        port = Port(
+            unlocode=locode_clean,
+            port_name=port_data.name.strip(),
+            country_code=locode_clean[:2],
+            subdivision_code="",
+            latitude=port_data.lat,
+            longitude=port_data.lon,
+            wpi_number=None,
+            channel_depth_m=15.0,
+            cargo_pier_depth_m=None,
+            anchorage_depth_m=None,
+            is_depth_available=True,
+            reconciliation_method="USER_CUSTOM",
+        )
+        session.add(port)
+        await session.flush()
+
+    new_watchlist_id = uuid.uuid4()
+    watchlist_entry = UserWatchlist(
+        watchlist_id=new_watchlist_id,
+        user_id=user_id,
+        unlocode=locode_clean,
+        vessel_class_id="panamax",
+        geofence_radius_nm=port_data.geofenceRadiusNm,
+    )
+    session.add(watchlist_entry)
+    await session.commit()
+
+    return PortResponse(
+        id=f"port-user-{new_watchlist_id}",
+        name=port_data.name.strip(),
+        locode=locode_clean,
+        country=port_data.country.strip(),
+        lat=round(float(port_data.lat), 6),
+        lon=round(float(port_data.lon), 6),
+        isDefault=False,
+        geofenceRadiusNm=port_data.geofenceRadiusNm,
+        addedByUserId=str(user_id),
+    )
+
+
+async def remove_user_watchlist_port(
+    session: AsyncSession, user_id: uuid.UUID, port_id: str
+) -> None:
+    """Remove a custom monitored port from the user's watchlist."""
+    clean_id = port_id.strip()
+
+    # Reject removal of system default benchmark ports
+    for locode, meta in BENCHMARK_PORTS_METADATA.items():
+        if clean_id.lower() == meta["id"].lower() or clean_id.upper() == locode:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error": "Bad Request",
+                    "message": "System default ports cannot be removed.",
+                    "statusCode": 400,
+                },
+            )
+
+    # Attempt lookup by watchlist UUID
+    target_uuid = None
+    if clean_id.lower().startswith("port-user-"):
+        try:
+            target_uuid = uuid.UUID(clean_id[10:])
+        except ValueError:
+            pass
+    else:
+        try:
+            target_uuid = uuid.UUID(clean_id)
+        except ValueError:
+            pass
+
+    if target_uuid:
+        stmt = select(UserWatchlist).where(UserWatchlist.watchlist_id == target_uuid)
+        entry = (await session.execute(stmt)).scalar_one_or_none()
+        if not entry:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "error": "Not Found",
+                    "message": f"Port '{port_id}' not found.",
+                    "statusCode": 404,
+                },
+            )
+        if entry.user_id != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": "Forbidden",
+                    "message": "You do not have permission to delete this port.",
+                    "statusCode": 403,
+                },
+            )
+        await session.delete(entry)
+        await session.commit()
+        return
+
+    # Attempt lookup by LOCODE
+    locode_candidate = clean_id[5:].upper() if clean_id.lower().startswith("port-") else clean_id.upper()
+    stmt = select(UserWatchlist).where(UserWatchlist.unlocode == locode_candidate)
+    entries = (await session.execute(stmt)).scalars().all()
+    if not entries:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": "Not Found",
+                "message": f"Port '{port_id}' not found.",
+                "statusCode": 404,
+            },
+        )
+
+    user_entry = next((e for e in entries if e.user_id == user_id), None)
+    if user_entry:
+        await session.delete(user_entry)
+        await session.commit()
+        return
+
+    # If entries exist but belong to other users
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={
+            "error": "Forbidden",
+            "message": "You do not have permission to delete this port.",
+            "statusCode": 403,
+        },
+    )
