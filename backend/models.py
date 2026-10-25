@@ -79,6 +79,9 @@ class VesselClass(Base):
     draft_m: Mapped[float] = mapped_column(Float, nullable=False)
     beam_m: Mapped[float] = mapped_column(Float, nullable=False)
     loa_m: Mapped[float] = mapped_column(Float, nullable=False)
+    sector: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    criteria: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    significance: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Relationships
     watchlists: Mapped[list["UserWatchlist"]] = relationship(

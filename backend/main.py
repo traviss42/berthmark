@@ -2,6 +2,7 @@
 
 from fastapi import FastAPI
 from pydantic import BaseModel
+from backend.taxonomy.router import router as taxonomy_router
 
 app = FastAPI(
     title="Berthmark Maritime Port-Call Risk Intelligence API",
@@ -9,6 +10,10 @@ app = FastAPI(
     docs_url="/docs",
     openapi_url="/openapi.json",
 )
+
+# Mount taxonomy routes under /api/v1 and root
+app.include_router(taxonomy_router, prefix="/api/v1")
+app.include_router(taxonomy_router)
 
 
 class HealthResponse(BaseModel):
