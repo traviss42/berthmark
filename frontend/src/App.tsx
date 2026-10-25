@@ -317,6 +317,11 @@ function AppContent() {
                 assessments={assessmentMap}
                 onSelectPort={handleSelectPort}
                 loading={portsLoading || riskLoading}
+                selectedVesselClass={vesselClass}
+                onAddFirstPort={() => {
+                  const input = document.getElementById('port-search-input');
+                  input?.focus();
+                }}
               />
             </div>
 

@@ -62,3 +62,51 @@ export function timeAgo(iso: string): string {
   const days = Math.floor(hours / 24);
   return `${days}d ago`;
 }
+
+export const VESSEL_CLASS_LABELS: Record<string, string> = {
+  feeder: 'Feeder',
+  panamax: 'Panamax',
+  neoPanamax: 'Neo-Panamax',
+  ulcv: 'ULCV',
+  mrTanker: 'MR Tanker',
+  aframax: 'Aframax',
+  suezmax: 'Suezmax',
+  vlcc: 'VLCC',
+  handysize: 'Handysize',
+  panamaxBulk: 'Panamax Bulk',
+  capesize: 'Capesize',
+  pctc: 'PCTC',
+  lng: 'LNG',
+};
+
+export function formatVesselClass(vesselClass: string): string {
+  if (VESSEL_CLASS_LABELS[vesselClass]) {
+    return VESSEL_CLASS_LABELS[vesselClass];
+  }
+  return vesselClass
+    .replace(/([A-Z])/g, ' $1')
+    .replace(/^./, (c) => c.toUpperCase());
+}
+
+export function formatQueueVariance(
+  anchored: number,
+  baselineAvg: number | null | undefined
+): { text: string; value: number | null } {
+  if (baselineAvg === null || baselineAvg === undefined || isNaN(baselineAvg)) {
+    return { text: 'N/A vs 7-day Avg', value: null };
+  }
+  if (baselineAvg === 0) {
+    if (anchored === 0) {
+      return { text: '0% vs 7-day Avg', value: 0 };
+    }
+    return { text: '+100% vs 7-day Avg', value: 100 };
+  }
+  const variance = ((anchored - baselineAvg) / baselineAvg) * 100;
+  const rounded = Math.round(variance);
+  const sign = rounded > 0 ? '+' : '';
+  return {
+    text: `${sign}${rounded}% vs 7-day Avg`,
+    value: rounded,
+  };
+}
+
