@@ -1,0 +1,35 @@
+# Git and CI/CD
+.git
+.github
+.gitignore
+
+# Gemini and Agentic CLI metadata
+.gemini
+_docs
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+env/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Frontend assets (handled in frontend context)
+frontend/node_modules/
+frontend/dist/
+
+# Local secrets and environment files
+.env
+.env.local
+.env.*.local
+*.db
+*.sqlite3
+
+# OS metadata
+.DS_Store
+Thumbs.db

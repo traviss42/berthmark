@@ -57,6 +57,14 @@ paths:
                 $ref: '#/components/schemas/HealthCheckResponse'
               example:
                 status: healthy
+        '503':
+          description: Service is unhealthy or dependencies are unreachable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheckResponse'
+              example:
+                status: unhealthy
 
   /api/v1/health:
     get:
@@ -73,6 +81,15 @@ paths:
               schema:
                 $ref: '#/components/schemas/HealthCheckResponse'
               example:
+                status: healthy
+        '503':
+          description: Service is unhealthy or dependencies are unreachable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheckResponse'
+              example:
+                status: unhealthy
                 status: healthy
 
   # ─────────────────────────────────────────────────────────────────────────────

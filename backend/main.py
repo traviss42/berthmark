@@ -65,6 +65,11 @@ app.include_router(ports_router)
 app.include_router(risk_router, prefix="/api/v1")
 app.include_router(risk_router)
 app.include_router(notifications_router, prefix="/api/v1")
+import asyncio
+import os
+import urllib.parse
+from backend.database import ping_database
+
 app.include_router(notifications_router)
 
 
@@ -72,13 +77,58 @@ class HealthResponse(BaseModel):
     status: str = "healthy"
 
 
+async def check_redis_health() -> bool:
+    """Test connectivity to Redis if CACHE_URL is configured."""
+    cache_url = os.getenv("CACHE_URL", "").strip()
+    if not cache_url:
+        return True
+    try:
+        parsed = urllib.parse.urlparse(cache_url)
+        host = parsed.hostname or "localhost"
+        port = parsed.port or 6379
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout=2.0
+        )
+        writer.write(b"PING\r\n")
+        await writer.drain()
+        reply = await asyncio.wait_for(reader.readline(), timeout=2.0)
+        writer.close()
+        await writer.wait_closed()
+        return reply.startswith(b"+PONG")
+    except Exception:
+        return False
+
+
+async def check_system_health() -> tuple[bool, str]:
+    """Perform health checks on database and cache dependencies."""
+    try:
+        db_ok = await ping_database()
+    except Exception:
+        db_ok = False
+
+    if not db_ok:
+        return False, "Database connectivity unavailable"
+
+    redis_ok = await check_redis_health()
+    if not redis_ok:
+        return False, "Cache connectivity unavailable"
+
+    return True, "healthy"
+
+
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
 async def health_check():
     """System health check endpoint."""
+    healthy, detail = await check_system_health()
+    if not healthy:
+        return JSONResponse(status_code=503, content={"status": "unhealthy", "message": detail})
     return HealthResponse(status="healthy")
 
 
 @app.get("/api/v1/health", response_model=HealthResponse, tags=["Health"])
 async def api_v1_health_check():
     """API v1 health check endpoint."""
+    healthy, detail = await check_system_health()
+    if not healthy:
+        return JSONResponse(status_code=503, content={"status": "unhealthy", "message": detail})
     return HealthResponse(status="healthy")
