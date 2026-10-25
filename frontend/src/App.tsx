@@ -8,6 +8,8 @@ import {
   LogOut,
   LogIn,
   X,
+  LayoutGrid,
+  Map as MapIcon,
 } from 'lucide-react';
 import type { VesselClass } from '@/types';
 import { usePorts, useRiskAssessments, useNotifications } from '@/hooks/useServices';
@@ -18,10 +20,12 @@ import { PortSearch } from '@/components/PortSearch';
 import { PortRiskDetail } from '@/components/PortRiskDetail';
 import { VesselClassSelector } from '@/components/VesselClassSelector';
 import { NotificationPanel } from '@/components/NotificationPanel';
+import { InteractiveMap } from '@/components/InteractiveMap';
 
 function AppContent() {
   const { user, isAuthenticated, logout } = useAuth();
   const { ports, loading: portsLoading, addPort, removePort } = usePorts();
+  const [viewMode, setViewMode] = useState<'grid' | 'map'>('grid');
   const [vesselClass, setVesselClass] = useState<VesselClass>('neoPanamax');
   const [selectedPortId, setSelectedPortId] = useState<string | null>(null);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -282,7 +286,35 @@ function AppContent() {
                   existingLocodes={existingLocodes}
                 />
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* View Mode Toggle */}
+                <div className="flex items-center rounded-lg border border-slate-200 bg-white p-0.5 shadow-2xs">
+                  <button
+                    data-testid="toggle-grid-view"
+                    onClick={() => setViewMode('grid')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
+                      viewMode === 'grid'
+                        ? 'bg-blue-50 text-blue-700 shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <LayoutGrid className="w-3.5 h-3.5" />
+                    <span>Grid</span>
+                  </button>
+                  <button
+                    data-testid="toggle-map-view"
+                    onClick={() => setViewMode('map')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
+                      viewMode === 'map'
+                        ? 'bg-blue-50 text-blue-700 shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <MapIcon className="w-3.5 h-3.5" />
+                    <span>Map</span>
+                  </button>
+                </div>
+
                 <VesselClassSelector value={vesselClass} onChange={setVesselClass} />
                 <button
                   onClick={handleRefresh}
@@ -298,11 +330,11 @@ function AppContent() {
               </div>
             </div>
 
-            {/* Port List */}
+            {/* Port Display (Grid vs Map View) */}
             <div>
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-semibold text-slate-700">
-                  Monitored Ports
+                  {viewMode === 'map' ? 'Interactive Risk Map' : 'Monitored Ports'}
                   <span className="ml-2 text-xs font-normal text-slate-400">
                     Risk evaluated for{' '}
                     {vesselClass
@@ -312,17 +344,31 @@ function AppContent() {
                   </span>
                 </h2>
               </div>
-              <PortList
-                ports={ports}
-                assessments={assessmentMap}
-                onSelectPort={handleSelectPort}
-                loading={portsLoading || riskLoading}
-                selectedVesselClass={vesselClass}
-                onAddFirstPort={() => {
-                  const input = document.getElementById('port-search-input');
-                  input?.focus();
-                }}
-              />
+
+              {viewMode === 'map' ? (
+                <InteractiveMap
+                  ports={ports}
+                  assessments={assessmentMap}
+                  vesselClass={vesselClass}
+                  onSelectPort={handleSelectPort}
+                  onAddFirstPort={() => {
+                    const input = document.getElementById('port-search-input');
+                    input?.focus();
+                  }}
+                />
+              ) : (
+                <PortList
+                  ports={ports}
+                  assessments={assessmentMap}
+                  onSelectPort={handleSelectPort}
+                  loading={portsLoading || riskLoading}
+                  selectedVesselClass={vesselClass}
+                  onAddFirstPort={() => {
+                    const input = document.getElementById('port-search-input');
+                    input?.focus();
+                  }}
+                />
+              )}
             </div>
 
             {/* Footer info */}
