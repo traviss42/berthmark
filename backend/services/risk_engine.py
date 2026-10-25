@@ -1,14 +1,17 @@
 """Weakest-Link Composite Risk Engine and Assessment Service."""
 
+import asyncio
 from datetime import datetime, timezone
 import logging
 from typing import Any
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from backend.models import AlertLog, Port, PortRiskSnapshot, UserWatchlist
+from backend.models import AlertLog, Port, PortRiskSnapshot, PortTrafficBaseline, UserWatchlist
+from backend.ports.service import BENCHMARK_PORTS_METADATA
 from backend.schemas.metrics import (
     CongestionMetrics,
     NavigationalMetrics,
@@ -17,7 +20,7 @@ from backend.schemas.metrics import (
     TerminalMetrics,
     WeatherMetrics,
 )
-from backend.schemas.risk import RiskAssessment, RiskTier, SubRisksDict
+from backend.schemas.risk import BulkRiskPortItem, RiskAssessment, RiskTier, SubRisksDict
 from backend.services.baseline import TrafficBaselineRepository
 from backend.services.congestion import assess_congestion_risk, calculate_queue_variance
 from backend.services.navigational import calculate_navigational_metrics
@@ -441,3 +444,204 @@ async def calculate_port_risk(
         )
 
     return assessment
+
+
+async def calculate_bulk_risk(
+    session: AsyncSession,
+    items: list[BulkRiskPortItem],
+    vessel_class: str,
+    timestamp: datetime | None = None,
+) -> list[RiskAssessment]:
+    """Concurrent, high-performance bulk risk evaluation with O(1) batched database queries."""
+    if vessel_class not in VALID_VESSEL_CLASSES:
+        raise ValueError(f"Invalid vesselClass '{vessel_class}'. Must be one of: {sorted(list(VALID_VESSEL_CLASSES))}")
+
+    if not items:
+        return []
+
+    ts = timestamp if timestamp is not None else datetime.now(timezone.utc)
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+
+    # 1. Deduplicate requested ports by resolved LOCODE / port ID
+    unique_items: list[BulkRiskPortItem] = []
+    seen_keys: set[str] = set()
+    candidate_locodes: dict[str, str] = {}  # clean_id -> locode
+    target_locodes_set: set[str] = set()
+
+    for item in items:
+        clean_id = item.id.strip()
+        locode_match = None
+        for locode, meta in BENCHMARK_PORTS_METADATA.items():
+            if meta["id"].lower() == clean_id.lower() or locode.lower() == clean_id.lower():
+                locode_match = locode.upper()
+                break
+        if not locode_match:
+            locode_match = clean_id[5:].upper() if clean_id.lower().startswith("port-") else clean_id.upper()
+
+        if locode_match not in seen_keys:
+            seen_keys.add(locode_match)
+            unique_items.append(item)
+            candidate_locodes[clean_id] = locode_match
+            target_locodes_set.add(locode_match)
+
+    # 3. Query all candidate ports in ONE batched query
+    ports_stmt = select(Port).where(func.upper(Port.unlocode).in_([l.upper() for l in target_locodes_set]))
+    ports_res = await session.execute(ports_stmt)
+    found_ports = list(ports_res.scalars().all())
+    ports_by_locode: dict[str, Port] = {p.unlocode.upper(): p for p in found_ports}
+
+    # Auto-seed any missing benchmark ports
+    benchmark_added = False
+    for item in unique_items:
+        clean_id = item.id.strip()
+        for locode, meta in BENCHMARK_PORTS_METADATA.items():
+            if (meta["id"].lower() == clean_id.lower() or locode.lower() == clean_id.lower()) and locode.upper() not in ports_by_locode:
+                p = Port(
+                    unlocode=meta["locode"],
+                    port_name=meta["name"],
+                    country_code=meta["country"],
+                    subdivision_code=meta["subdivision"],
+                    latitude=meta["lat"],
+                    longitude=meta["lon"],
+                    wpi_number=meta.get("wpiNumber"),
+                    channel_depth_m=meta.get("channelDepthM"),
+                    cargo_pier_depth_m=meta.get("pierDepthM"),
+                    anchorage_depth_m=meta.get("anchorageDepthM"),
+                    is_depth_available=meta.get("channelDepthM") is not None,
+                    reconciliation_method="EXACT_UNLOCODE",
+                )
+                session.add(p)
+                found_ports.append(p)
+                ports_by_locode[locode.upper()] = p
+                benchmark_added = True
+
+    if benchmark_added:
+        await session.flush()
+
+    # Match items to resolved Port entities
+    resolved_pairs: list[tuple[BulkRiskPortItem, Port]] = []
+    for item in unique_items:
+        locode = candidate_locodes[item.id.strip()]
+        if locode in ports_by_locode:
+            resolved_pairs.append((item, ports_by_locode[locode]))
+
+    if not resolved_pairs:
+        return []
+
+    locode_keys = list({p.unlocode.upper() for _, p in resolved_pairs})
+
+    # 4. Query baselines in ONE batched query
+    day_of_week = (ts.weekday() + 1) % 7
+    hour_of_day = ts.hour
+    baseline_stmt = select(PortTrafficBaseline).where(
+        PortTrafficBaseline.unlocode.in_(locode_keys),
+        PortTrafficBaseline.day_of_week == day_of_week,
+        PortTrafficBaseline.hour_of_day == hour_of_day,
+    )
+    b_res = await session.execute(baseline_stmt)
+    baselines_by_locode: dict[str, PortTrafficBaseline] = {
+        b.unlocode.upper(): b for b in b_res.scalars().all()
+    }
+
+    # 5. Query snapshots in ONE batched query using selectinload eager loading
+    snap_stmt = (
+        select(PortRiskSnapshot)
+        .options(
+            selectinload(PortRiskSnapshot.port),
+            selectinload(PortRiskSnapshot.vessel_class),
+        )
+        .where(
+            PortRiskSnapshot.unlocode.in_(locode_keys),
+            PortRiskSnapshot.vessel_class_id == vessel_class,
+        )
+        .order_by(PortRiskSnapshot.updated_at.desc())
+    )
+    s_res = await session.execute(snap_stmt)
+    snapshots_by_locode: dict[str, PortRiskSnapshot] = {}
+    for s in s_res.scalars().all():
+        if s.unlocode.upper() not in snapshots_by_locode:
+            snapshots_by_locode[s.unlocode.upper()] = s
+
+    # 6. Concurrently evaluate each resolved port in-memory
+    async def evaluate_item(item: BulkRiskPortItem, port: Port) -> RiskAssessment:
+        locode = port.unlocode.upper()
+        baseline = baselines_by_locode.get(locode)
+        hist_avg = baseline.avg_anchored_count if baseline else None
+        snap = snapshots_by_locode.get(locode)
+
+        anchored_count = (
+            snap.anchored_vessel_count
+            if snap
+            else (int(hist_avg) if hist_avg is not None else 3)
+        )
+        underway_count = snap.underway_vessel_count if snap else 2
+
+        weather_metrics = WeatherMetrics(
+            windSpeedKnots=snap.wind_speed_kts if snap and snap.wind_speed_kts is not None else 12.0,
+            waveHeightM=snap.swell_height_m if snap and snap.swell_height_m is not None else 0.8,
+            swellPeriodSec=6.0,
+            visibilityNm=10.0,
+            gustSpeedKnots=15.0,
+        )
+        weather_subrisk = evaluate_weather_risk(weather_metrics)
+
+        congestion_assessment = assess_congestion_risk(
+            anchored_count=anchored_count,
+            hist_avg_anchored=hist_avg,
+            underway_count=underway_count,
+        )
+        congestion_subrisk = SubRiskResult(**congestion_assessment.to_subrisk_result())
+        congestion_metrics = CongestionMetrics(**congestion_assessment.to_congestion_metrics())
+
+        base_turnaround = (
+            50.0
+            if congestion_subrisk.tier == "high"
+            else (32.0 if congestion_subrisk.tier == "medium" else 24.0)
+        )
+        terminal_metrics = calculate_terminal_metrics(
+            berth_turnaround_hours=base_turnaround,
+            avg_waiting_time_hours=congestion_metrics.avgWaitingTimeHours,
+            rolling_30d_avg_turnaround=22.0,
+        )
+        terminal_subrisk = evaluate_terminal_delays(terminal_metrics)
+
+        nav_metrics, nav_subrisk = calculate_navigational_metrics(
+            vessel_class=vessel_class,
+            channel_depth_m=port.channel_depth_m,
+            wave_height_m=weather_metrics.waveHeightM,
+            wind_speed_knots=weather_metrics.windSpeedKnots,
+        )
+
+        sub_risks = SubRisksDict(
+            congestion=congestion_subrisk,
+            terminalDelays=terminal_subrisk,
+            weather=weather_subrisk,
+            navigational=nav_subrisk,
+        )
+
+        canonical_port_id = item.id
+        canonical_port_name = item.name or port.port_name
+
+        unified_metrics = assemble_port_metrics(
+            port_id=canonical_port_id,
+            congestion=congestion_metrics,
+            terminal=terminal_metrics,
+            weather=weather_metrics,
+            navigational=nav_metrics,
+            timestamp=ts,
+        )
+
+        return assemble_risk_assessment(
+            port_id=canonical_port_id,
+            port_name=canonical_port_name,
+            vessel_class=vessel_class,
+            sub_risks=sub_risks,
+            metrics=unified_metrics,
+            timestamp=ts,
+        )
+
+    tasks = [evaluate_item(item, port) for item, port in resolved_pairs]
+    results = await asyncio.gather(*tasks)
+    return list(results)
+

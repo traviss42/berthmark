@@ -10,9 +10,10 @@ from backend.auth.schemas import ErrorResponse
 from backend.database import get_db_session
 from backend.models import Port
 from backend.ports.service import BENCHMARK_PORTS_METADATA
-from backend.schemas.risk import RiskAssessment
+from backend.schemas.risk import BulkRiskAssessmentRequest, RiskAssessment
 from backend.services.risk_engine import (
     VALID_VESSEL_CLASSES,
+    calculate_bulk_risk,
     calculate_port_risk,
 )
 
@@ -143,6 +144,48 @@ async def get_port_risk(
             detail={
                 "error": "Internal Server Error",
                 "message": f"Failed to calculate risk assessment: {str(exc)}",
+                "statusCode": 500,
+            },
+        )
+
+
+@router.post(
+    "/risk/assessments/bulk",
+    response_model=list[RiskAssessment],
+    summary="Bulk evaluate risk assessments for multiple ports",
+    responses={
+        200: {"description": "Bulk assessment results for each requested port.", "model": list[RiskAssessment]},
+        400: {"description": "Invalid request payload.", "model": ErrorResponse},
+        500: {"description": "Internal server error.", "model": ErrorResponse},
+    },
+)
+async def bulk_risk_assessment(
+    request: BulkRiskAssessmentRequest,
+    session: AsyncSession = Depends(get_db_session),
+) -> list[RiskAssessment]:
+    """Bulk calculate risk assessments concurrently for an array of ports under a selected vessel class."""
+    try:
+        return await calculate_bulk_risk(
+            session=session,
+            items=request.ports,
+            vessel_class=request.vesselClass,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "Bad Request",
+                "message": str(exc),
+                "statusCode": 400,
+            },
+        )
+    except Exception as exc:
+        logger.exception("Failed to calculate bulk risk assessment: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": "Internal Server Error",
+                "message": f"Failed to execute bulk risk assessment: {str(exc)}",
                 "statusCode": 500,
             },
         )

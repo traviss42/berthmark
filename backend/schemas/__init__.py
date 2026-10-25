@@ -9,12 +9,16 @@ from backend.schemas.metrics import (
     WeatherMetrics,
 )
 from backend.schemas.risk import (
+    BulkRiskAssessmentRequest,
+    BulkRiskPortItem,
     RiskAssessment,
     RiskTier,
     SubRisksDict,
 )
 
 __all__ = [
+    "BulkRiskAssessmentRequest",
+    "BulkRiskPortItem",
     "CongestionMetrics",
     "NavigationalMetrics",
     "PortMetrics",

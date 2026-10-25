@@ -9,6 +9,55 @@ from backend.schemas.metrics import PortMetrics, SubRiskResult
 RiskTier = Literal["low", "medium", "high"]
 
 
+class BulkRiskPortItem(BaseModel):
+    """Port item within bulk risk assessment request."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(..., min_length=1, description="Target port ID or UN/LOCODE.")
+    name: str | None = Field(None, description="Optional human-readable port name.")
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, v: Any) -> str:
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError("Port id must be a non-empty string.")
+        return v.strip()
+
+
+VALID_VESSEL_CLASSES: set[str] = {
+    "feeder",
+    "panamax",
+    "neoPanamax",
+    "ulcv",
+    "mrTanker",
+    "aframax",
+    "suezmax",
+    "vlcc",
+    "handysize",
+    "panamaxBulk",
+    "capesize",
+    "pctc",
+    "lng",
+}
+
+
+class BulkRiskAssessmentRequest(BaseModel):
+    """Request payload for bulk risk assessment evaluations."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    ports: list[BulkRiskPortItem] = Field(..., min_length=1, description="List of target ports to assess.")
+    vesselClass: str = Field(..., min_length=1, description="Target benchmark vessel class.")
+
+    @field_validator("vesselClass")
+    @classmethod
+    def validate_vessel_class(cls, v: Any) -> str:
+        if not isinstance(v, str) or v not in VALID_VESSEL_CLASSES:
+            raise ValueError(f"Invalid vesselClass '{v}'. Must be one of: {sorted(list(VALID_VESSEL_CLASSES))}")
+        return v
+
+
 class SubRisksDict(BaseModel):
     """Container for the four operational sub-risk evaluation results."""
 
