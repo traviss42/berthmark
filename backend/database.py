@@ -2,18 +2,26 @@
 
 import os
 from collections.abc import AsyncGenerator
-from sqlalchemy import text
+from sqlalchemy import event, text
+from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.orm import declarative_base
+from backend.models import Base
 
 DEFAULT_DATABASE_URL = "sqlite+aiosqlite:///./berthmark.db"
 
-Base = declarative_base()
+
+@event.listens_for(Engine, "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record):
+    """Enforce foreign key constraints on SQLite connections."""
+    if hasattr(dbapi_connection, "cursor"):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
 
 def get_database_url() -> str:
@@ -59,11 +67,15 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    """FastAPI dependency yielding an async database session."""
+    """FastAPI dependency yielding an async session that commits on success and rolls back on exception."""
     factory = get_session_factory()
     async with factory() as session:
         try:
             yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
         finally:
             await session.close()
 
@@ -75,3 +87,12 @@ async def ping_database() -> bool:
         result = await conn.execute(text("SELECT 1"))
         scalar = result.scalar()
         return scalar == 1
+
+
+async def reset_engine() -> None:
+    """Dispose active engine and reset singletons (useful for test isolation)."""
+    global _engine, _session_factory
+    if _engine is not None:
+        await _engine.dispose()
+        _engine = None
+        _session_factory = None
