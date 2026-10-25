@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Bell,
   Globe,
@@ -90,6 +90,18 @@ function AppContent() {
     setSelectedPortId(null);
   }, [removePort, selectedPortId]);
 
+  // Close notification panel on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showNotifications) setShowNotifications(false);
+        if (showLoginModal) setShowLoginModal(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showNotifications, showLoginModal]);
+
   const existingLocodes = useMemo(() => ports.map((p) => p.locode), [ports]);
 
   const handleAddPortWithAuth = useCallback(
@@ -155,20 +167,18 @@ function AppContent() {
               )}
 
               <button
-                onClick={() => {
-                  if (!isAuthenticated) {
-                    setShowLoginModal(true);
-                  } else {
-                    setShowNotifications(!showNotifications);
-                  }
-                }}
+                data-testid="notification-bell-btn"
+                onClick={() => setShowNotifications((prev) => !prev)}
                 className="relative p-2 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
                 aria-label="Notifications"
               >
                 <Bell className="w-5 h-5 text-slate-600" />
                 {unreadCount > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
-                    {unreadCount}
+                  <span
+                    data-testid="notification-badge"
+                    className="absolute -top-0.5 -right-0.5 min-w-[18px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center shadow-xs"
+                  >
+                    {unreadCount > 99 ? '99+' : unreadCount}
                   </span>
                 )}
               </button>
@@ -202,8 +212,9 @@ function AppContent() {
       )}
 
       {/* Notification dropdown */}
-      {showNotifications && isAuthenticated && (
+      {showNotifications && (
         <div
+          data-testid="notification-backdrop"
           className="fixed inset-0 z-40"
           onClick={() => setShowNotifications(false)}
         >
