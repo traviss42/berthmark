@@ -13,8 +13,8 @@ class CongestionMetrics(BaseModel):
     anchorageQueueCount: int = Field(..., ge=0, description="Count of stationary/anchored vessels.")
     avgWaitingTimeHours: float = Field(..., ge=0.0, description="Average anchorage waiting time in hours.")
     berthOccupancyPct: float = Field(..., ge=0.0, le=100.0, description="Current berth occupancy percentage.")
-    rolling30dAvgQueue: float = Field(..., ge=0.0, description="Rolling 30-day historical average queue count.")
-    rolling30dAvgWaitHours: float = Field(..., ge=0.0, description="Rolling 30-day historical average wait hours.")
+    rolling30dAvgQueue: float | None = Field(default=None, description="Rolling historical average queue count (None if collecting baseline).")
+    rolling30dAvgWaitHours: float | None = Field(default=None, description="Rolling historical average wait hours.")
 
 
 class TerminalMetrics(BaseModel):

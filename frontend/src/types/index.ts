@@ -58,8 +58,8 @@ export interface CongestionMetrics {
   anchorageQueueCount: number;
   avgWaitingTimeHours: number;
   berthOccupancyPct: number;
-  rolling30dAvgQueue: number;
-  rolling30dAvgWaitHours: number;
+  rolling30dAvgQueue: number | null;
+  rolling30dAvgWaitHours: number | null;
 }
 
 export interface TerminalMetrics {

@@ -101,7 +101,7 @@ The database seeder automatically creates an initial Ship Operations Manager acc
    ```
 
 3. **Seed benchmark data**:
-   Populates commercial vessel taxonomy, the default operator profile, and 168-hour traffic baselines:
+   Populates commercial vessel taxonomy, the default operator profile, and benchmark ports (traffic baselines accumulate dynamically from live AIS observations):
    ```bash
    uv run python -m backend.seed
    ```

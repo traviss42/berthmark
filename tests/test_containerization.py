@@ -135,7 +135,7 @@ async def test_seeder_execution():
     assert "vessel_classes" in stats
     assert "default_user" in stats
     assert stats["default_user"] == "operator@maritimerisk.com"
-    assert "baselines" in stats
+    assert "benchmark_ports" in stats
 
 
 @pytest.mark.asyncio

@@ -86,6 +86,30 @@ BENCHMARK_PORTS_METADATA: dict[str, dict[str, Any]] = {
 }
 
 
+async def seed_benchmark_ports(session: AsyncSession) -> int:
+    """Idempotently seed the default benchmark ports in the ports table without fake traffic baselines."""
+    seeded = 0
+    for locode, meta in BENCHMARK_PORTS_METADATA.items():
+        stmt = select(Port).where(Port.unlocode == locode)
+        port = (await session.execute(stmt)).scalar_one_or_none()
+        if port is None:
+            port = Port(
+                unlocode=locode,
+                port_name=meta["name"],
+                country_code=meta["country_code"],
+                subdivision_code="",
+                latitude=meta["lat"],
+                longitude=meta["lon"],
+                channel_depth_m=12.0,
+                is_depth_available=True,
+                reconciliation_method="BENCHMARK_DEFAULT",
+            )
+            session.add(port)
+            seeded += 1
+    await session.commit()
+    return seeded
+
+
 def port_to_response(port: Port, is_default: bool = False) -> PortResponse:
     """Format SQLAlchemy Port entity into API PortResponse schema."""
     locode_upper = port.unlocode.upper()

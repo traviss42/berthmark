@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from backend.database import get_session_factory
 from backend.models import Port, PortRiskSnapshot, UserWatchlist, utc_now
 from backend.services.bounding_box import calculate_bounding_box
+from backend.services.congestion import update_port_traffic_baseline_from_observation
 
 logger = logging.getLogger(__name__)
 
@@ -348,6 +349,15 @@ class AISStreamWorker:
                             )
                             session.add(new_snapshot)
                         await session.commit()
+
+                        # Accumulate real observation into rolling baseline
+                        await update_port_traffic_baseline_from_observation(
+                            session,
+                            update.unlocode,
+                            anchored_count=update.anchored_count,
+                            underway_count=update.underway_count,
+                            total_count=update.total_count,
+                        )
                     self.queue.task_done()
                     break
                 except Exception as exc:

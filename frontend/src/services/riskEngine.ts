@@ -23,10 +23,30 @@ function assessCongestion(metrics: PortMetrics): SubRiskResult {
   const c = metrics.congestion;
   const factors: string[] = [];
 
+  // Fallback if historical baseline is absent
+  if (c.rolling30dAvgQueue === null || c.rolling30dAvgQueue === undefined) {
+    let tier: RiskTier = 'low';
+    let detail = `Normal congestion: ${c.anchorageQueueCount} vessels anchored (baseline collecting).`;
+
+    if (c.anchorageQueueCount > 15) {
+      tier = 'high';
+      detail = `Severe congestion: ${c.anchorageQueueCount} vessels anchored.`;
+      factors.push(`Anchored vessel count ${c.anchorageQueueCount} exceeds high threshold (>15)`);
+    } else if (c.anchorageQueueCount >= 6) {
+      tier = 'medium';
+      detail = `Moderate congestion: ${c.anchorageQueueCount} vessels anchored.`;
+      factors.push(`Anchored vessel count ${c.anchorageQueueCount} in moderate range (6-15)`);
+    } else {
+      factors.push(`Anchored vessel count ${c.anchorageQueueCount} in normal range (0-5)`);
+    }
+    factors.push('Historical baseline unavailable (collecting real data)');
+    return { category: 'congestion', tier, score: tierToScore(tier), detail, factors };
+  }
+
   const queueRatio = c.rolling30dAvgQueue > 0
     ? c.anchorageQueueCount / c.rolling30dAvgQueue
     : 1;
-  const waitRatio = c.rolling30dAvgWaitHours > 0
+  const waitRatio = (c.rolling30dAvgWaitHours && c.rolling30dAvgWaitHours > 0)
     ? c.avgWaitingTimeHours / c.rolling30dAvgWaitHours
     : 1;
 
@@ -42,7 +62,7 @@ function assessCongestion(metrics: PortMetrics): SubRiskResult {
   }
 
   if (queueRatio >= 1.2) factors.push(`Anchorage queue ${c.anchorageQueueCount} vs ${c.rolling30dAvgQueue} avg (ratio ${queueRatio.toFixed(2)})`);
-  if (waitRatio >= 1.2) factors.push(`Avg wait ${c.avgWaitingTimeHours}h vs ${c.rolling30dAvgWaitHours}h avg (ratio ${waitRatio.toFixed(2)})`);
+  if (waitRatio >= 1.2 && c.rolling30dAvgWaitHours) factors.push(`Avg wait ${c.avgWaitingTimeHours}h vs ${c.rolling30dAvgWaitHours}h avg (ratio ${waitRatio.toFixed(2)})`);
   if (c.berthOccupancyPct >= 75) factors.push(`Berth occupancy at ${c.berthOccupancyPct}%`);
 
   return { category: 'congestion', tier, score: tierToScore(tier), detail, factors };

@@ -201,7 +201,7 @@ describe('PortCard Component', () => {
       },
     };
     rerender(<PortCard port={mockPortRotterdam} assessment={nullBaselineAssessment} />);
-    expect(screen.getByTestId('queue-variance').textContent).toContain('N/A vs 7-day Avg');
+    expect(screen.getByTestId('queue-variance').textContent).toContain('N/A — Collecting Baseline');
   });
 
   it('renders Depth N/A badge when depth is unavailable or missing', () => {

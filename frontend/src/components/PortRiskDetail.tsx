@@ -106,7 +106,14 @@ export function PortRiskDetail({ assessment, onBack, onRemove, canRemove, onRefr
               <Metric label="Anchorage Queue" value={`${m.congestion.anchorageQueueCount} vessels`} />
               <Metric label="Avg Wait Time" value={`${m.congestion.avgWaitingTimeHours}h`} />
               <Metric label="Berth Occupancy" value={`${m.congestion.berthOccupancyPct}%`} />
-              <Metric label="30d Avg Queue" value={`${m.congestion.rolling30dAvgQueue} vessels`} />
+              <Metric
+                label="30d Avg Queue"
+                value={
+                  m.congestion.rolling30dAvgQueue !== null && m.congestion.rolling30dAvgQueue !== undefined
+                    ? `${m.congestion.rolling30dAvgQueue} vessels`
+                    : 'N/A — Collecting Baseline'
+                }
+              />
             </div>
           </div>
 

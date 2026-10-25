@@ -93,7 +93,7 @@ export function formatQueueVariance(
   baselineAvg: number | null | undefined
 ): { text: string; value: number | null } {
   if (baselineAvg === null || baselineAvg === undefined || isNaN(baselineAvg)) {
-    return { text: 'N/A vs 7-day Avg', value: null };
+    return { text: 'N/A — Collecting Baseline', value: null };
   }
   if (baselineAvg === 0) {
     if (anchored === 0) {

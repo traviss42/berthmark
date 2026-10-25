@@ -1,6 +1,5 @@
 """Unit and integration tests for Port Traffic Baselines and Congestion Risk Module."""
 
-import uuid
 from datetime import datetime, timezone
 import pytest
 import pytest_asyncio
@@ -8,13 +7,12 @@ from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from backend.models import Base, Port, PortTrafficBaseline
-from backend.services.baseline import (
-    TrafficBaselineRepository,
-    seed_traffic_baselines,
-)
 from backend.services.congestion import (
     assess_congestion_risk,
     calculate_queue_variance,
+    get_baseline_slot,
+    get_port_traffic_baseline,
+    update_port_traffic_baseline_from_observation,
 )
 
 
@@ -143,28 +141,31 @@ def test_hierarchical_conflicting_signals():
     assert res_med_drop.score == 60.0
 
 
-# ─── 3. Unit Tests: Cold-Start & Uninitialized States ──────────────────────────
+# ─── 3. Unit Tests: Cold-Start & Missing Baseline Fallbacks ────────────────────
 
 def test_cold_start_handling():
-    """Verify fallback to ship count thresholds when historical baseline is unavailable."""
-    # Low count in cold-start
+    """Verify fallback solely to ship count thresholds when historical baseline is absent."""
+    # Low count in cold-start (0-5 -> LOW)
     res_low = assess_congestion_risk(anchored_count=3, hist_avg_anchored=None)
     assert res_low.is_cold_start is True
     assert res_low.tier == "low"
     assert res_low.score == 25.0
-    assert "cold-start" in res_low.detail
+    assert res_low.queue_variance_pct is None
+    assert "baseline collecting" in res_low.detail
 
-    # Medium count in cold-start
+    # Medium count in cold-start (6-15 -> MEDIUM)
     res_med = assess_congestion_risk(anchored_count=10, hist_avg_anchored=None)
     assert res_med.is_cold_start is True
     assert res_med.tier == "medium"
     assert res_med.score == 60.0
+    assert res_med.queue_variance_pct is None
 
-    # High count in cold-start
+    # High count in cold-start (>15 -> HIGH)
     res_high = assess_congestion_risk(anchored_count=18, hist_avg_anchored=None)
     assert res_high.is_cold_start is True
     assert res_high.tier == "high"
     assert res_high.score == 90.0
+    assert res_high.queue_variance_pct is None
 
 
 def test_uninitialized_live_count():
@@ -172,6 +173,7 @@ def test_uninitialized_live_count():
     res = assess_congestion_risk(anchored_count=None, hist_avg_anchored=10.0)
     assert res.tier == "low"
     assert res.score == 25.0
+    assert res.queue_variance_pct is None
     assert "Initializing live traffic" in res.detail
 
 
@@ -189,77 +191,93 @@ def test_openapi_output_schema_helpers():
     assert isinstance(subrisk["detail"], str)
     assert len(subrisk["factors"]) >= 2
 
-    # CongestionMetrics
+    # CongestionMetrics with baseline present
     metrics = res.to_congestion_metrics()
     assert metrics["anchorageQueueCount"] == 18
     assert metrics["rolling30dAvgQueue"] == 11.6
     assert metrics["avgWaitingTimeHours"] > 0
     assert 0 <= metrics["berthOccupancyPct"] <= 100
 
+    # CongestionMetrics without baseline -> rolling30dAvgQueue is None
+    cold_res = assess_congestion_risk(anchored_count=4, hist_avg_anchored=None)
+    cold_metrics = cold_res.to_congestion_metrics()
+    assert cold_metrics["rolling30dAvgQueue"] is None
 
-# ─── 5. Integration Tests: Repository CRUD & Seeding ───────────────────────────
+
+# ─── 5. Integration Tests: True Rolling Average Accumulation ───────────────────
 
 @pytest.mark.asyncio
-async def test_baseline_repository_crud(baseline_test_db):
-    """Verify TrafficBaselineRepository get, get_current, and upsert operations."""
+async def test_baseline_repository_crud_and_rolling_updates(baseline_test_db):
+    """Verify get_baseline_slot and update_port_traffic_baseline_from_observation."""
     session_factory = baseline_test_db
 
     async with session_factory() as session:
         # 1. Non-existent slot returns None
-        rec = await TrafficBaselineRepository.get_baseline(session, "NLRTM", 1, 14)
+        rec = await get_baseline_slot(session, "NLRTM", day_of_week=1, hour_of_day=14)
         assert rec is None
 
-        # 2. Upsert new record (Monday=1, 14:00)
-        created = await TrafficBaselineRepository.upsert_baseline(
-            session, "NLRTM", day_of_week=1, hour_of_day=14, avg_anchored=15.5, avg_underway=8.0
+        # 2. First real observation creates slot using observed real numbers
+        ts = datetime(2026, 10, 26, 14, 30, tzinfo=timezone.utc)  # Monday=1, 14:00
+        created = await update_port_traffic_baseline_from_observation(
+            session,
+            unlocode="NLRTM",
+            anchored_count=15,
+            underway_count=8,
+            total_count=23,
+            timestamp=ts,
         )
         assert created.unlocode == "NLRTM"
-        assert created.avg_anchored_count == 15.5
+        assert created.day_of_week == 1
+        assert created.hour_of_day == 14
+        assert created.avg_anchored_count == 15.0
         assert created.avg_underway_count == 8.0
-        assert created.avg_total_active == 23.5
+        assert created.avg_total_active == 23.0
 
-        # 3. Retrieve using get_baseline
-        retrieved = await TrafficBaselineRepository.get_baseline(session, "NLRTM", 1, 14)
-        assert retrieved is not None
-        assert retrieved.avg_anchored_count == 15.5
+        # 3. Retrieve using timestamp lookup
+        current = await get_port_traffic_baseline(session, "NLRTM", timestamp=ts)
+        assert current is not None
+        assert current.avg_anchored_count == 15.0
 
-        # 4. Upsert update existing slot
-        updated = await TrafficBaselineRepository.upsert_baseline(
-            session, "NLRTM", day_of_week=1, hour_of_day=14, avg_anchored=18.0, avg_underway=10.0
+        # 4. Second real observation updates rolling average using EMA (alpha=0.1)
+        # new_avg = (1 - 0.1) * 15.0 + 0.1 * 25 = 13.5 + 2.5 = 16.0
+        updated = await update_port_traffic_baseline_from_observation(
+            session,
+            unlocode="NLRTM",
+            anchored_count=25,
+            underway_count=18,
+            total_count=43,
+            timestamp=ts,
+            alpha=0.1,
         )
         assert updated.baseline_id == created.baseline_id
-        assert updated.avg_anchored_count == 18.0
+        assert updated.avg_anchored_count == 16.0
+        assert updated.avg_underway_count == 9.0
+        assert updated.avg_total_active == 25.0
 
-        # 5. Timestamp-aware lookup
-        # Monday at 14:30 UTC
-        ts = datetime(2026, 10, 26, 14, 30, tzinfo=timezone.utc)  # Oct 26 2026 is Monday
-        current = await TrafficBaselineRepository.get_current_baseline(session, "NLRTM", timestamp=ts)
-        assert current is not None
-        assert current.avg_anchored_count == 18.0
-
-        # 6. Invalid day/hour raises ValueError
+        # 5. Invalid day/hour raises ValueError
         with pytest.raises(ValueError):
-            await TrafficBaselineRepository.get_baseline(session, "NLRTM", -1, 10)
+            await get_baseline_slot(session, "NLRTM", -1, 10)
         with pytest.raises(ValueError):
-            await TrafficBaselineRepository.get_baseline(session, "NLRTM", 1, 24)
+            await get_baseline_slot(session, "NLRTM", 1, 24)
 
 
 @pytest.mark.asyncio
-async def test_seed_traffic_baselines_idempotency(baseline_test_db):
-    """Verify seed_traffic_baselines populates all 168 slots per port and is idempotent."""
+async def test_no_synthetic_data_in_fresh_database(baseline_test_db):
+    """Verify that a fresh port has zero baseline rows and evaluates cleanly to None variance."""
     session_factory = baseline_test_db
 
     async with session_factory() as session:
-        # Initial seed
-        count1 = await seed_traffic_baselines(session)
-        assert count1 == 5 * 168  # 5 benchmark ports * 168 slots
+        # Check no baselines exist for Rotterdam
+        stmt = select(PortTrafficBaseline).where(PortTrafficBaseline.unlocode == "NLRTM")
+        rows = (await session.execute(stmt)).scalars().all()
+        assert len(rows) == 0
 
-        # Second seed (idempotent update)
-        count2 = await seed_traffic_baselines(session)
-        assert count2 == 5 * 168
+        # Lookup returns None
+        baseline = await get_port_traffic_baseline(session, "NLRTM")
+        assert baseline is None
 
-        # Verify Rotterdam slot (Sunday=0, 12:00)
-        rtm_slot = await TrafficBaselineRepository.get_baseline(session, "NLRTM", 0, 12)
-        assert rtm_slot is not None
-        assert rtm_slot.avg_anchored_count > 0.0
-        assert rtm_slot.avg_total_active == round(rtm_slot.avg_anchored_count + rtm_slot.avg_underway_count, 1)
+        # Assessment produces None variance and falls back to count threshold
+        assessment = assess_congestion_risk(anchored_count=4, hist_avg_anchored=None)
+        assert assessment.queue_variance_pct is None
+        assert assessment.tier == "low"
+        assert assessment.score == 25.0

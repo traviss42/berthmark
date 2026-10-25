@@ -21,8 +21,11 @@ from backend.schemas.metrics import (
     WeatherMetrics,
 )
 from backend.schemas.risk import BulkRiskPortItem, RiskAssessment, RiskTier, SubRisksDict
-from backend.services.baseline import TrafficBaselineRepository
-from backend.services.congestion import assess_congestion_risk, calculate_queue_variance
+from backend.services.congestion import (
+    assess_congestion_risk,
+    calculate_queue_variance,
+    get_port_traffic_baseline,
+)
 from backend.services.navigational import calculate_navigational_metrics
 from backend.services.port_metrics import assemble_port_metrics
 from backend.services.terminal import calculate_terminal_metrics, evaluate_terminal_delays
@@ -288,8 +291,8 @@ async def persist_risk_assessment(
         anchored_vessel_count=anchored_count,
         underway_vessel_count=underway_count,
         total_active_geofence_count=anchored_count + underway_count,
-        historical_avg_queue=hist_avg,
-        queue_variance_pct=variance_pct,
+        historical_avg_queue=hist_avg if hist_avg is not None else 0.0,
+        queue_variance_pct=variance_pct if variance_pct is not None else 0.0,
         congestion_risk_level=sub_risks.congestion.tier.upper(),
         weather_risk_level=sub_risks.weather.tier.upper(),
         overall_risk_level=new_risk_level,
@@ -354,7 +357,7 @@ async def calculate_port_risk(
     weather_subrisk = evaluate_weather_risk(weather_metrics)
 
     # 2. Congestion domain
-    baseline = await TrafficBaselineRepository.get_current_baseline(session, port.unlocode, ts)
+    baseline = await get_port_traffic_baseline(session, port.unlocode, ts)
     hist_avg = baseline.avg_anchored_count if baseline else None
 
     # Fetch live counts from override, latest snapshot, or default
@@ -374,8 +377,8 @@ async def calculate_port_risk(
             anchored_count = snap.anchored_vessel_count
             underway_count = snap.underway_vessel_count
         else:
-            anchored_count = int(hist_avg) if hist_avg is not None else 3
-            underway_count = 2
+            anchored_count = int(hist_avg) if hist_avg is not None else 0
+            underway_count = 0
 
     congestion_assessment = assess_congestion_risk(
         anchored_count=anchored_count,
@@ -578,9 +581,9 @@ async def calculate_bulk_risk(
         anchored_count = (
             snap.anchored_vessel_count
             if snap
-            else (int(hist_avg) if hist_avg is not None else 3)
+            else (int(hist_avg) if hist_avg is not None else 0)
         )
-        underway_count = snap.underway_vessel_count if snap else 2
+        underway_count = snap.underway_vessel_count if snap else 0
 
         weather_metrics = WeatherMetrics(
             windSpeedKnots=snap.wind_speed_kts if snap and snap.wind_speed_kts is not None else 12.0,

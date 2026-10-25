@@ -4,7 +4,7 @@ import asyncio
 import logging
 from backend.auth.seed import seed_default_user
 from backend.database import get_session_factory
-from backend.services.baseline import seed_traffic_baselines
+from backend.ports.service import seed_benchmark_ports
 from backend.taxonomy.seed import seed_vessel_classes
 
 logger = logging.getLogger("backend.seed")
@@ -27,10 +27,10 @@ async def run_seeders() -> dict[str, int | str]:
         stats["default_user"] = user.email
         logger.info("Default operator user verified: %s", user.email)
 
-        logger.info("Seeding benchmark ports and 168-hour traffic baselines...")
-        baselines_count = await seed_traffic_baselines(session)
-        stats["baselines"] = baselines_count
-        logger.info("Traffic baselines seeded/verified: %d slots", baselines_count)
+        logger.info("Seeding default benchmark ports...")
+        ports_count = await seed_benchmark_ports(session)
+        stats["benchmark_ports"] = ports_count
+        logger.info("Benchmark ports seeded/verified: %d", ports_count)
 
     return stats
 

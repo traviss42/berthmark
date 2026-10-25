@@ -1014,8 +1014,6 @@ components:
         - anchorageQueueCount
         - avgWaitingTimeHours
         - berthOccupancyPct
-        - rolling30dAvgQueue
-        - rolling30dAvgWaitHours
       properties:
         anchorageQueueCount:
           type: integer
@@ -1038,14 +1036,14 @@ components:
         rolling30dAvgQueue:
           type: number
           format: float
-          minimum: 0
-          description: Rolling 30-day historical average queue count for baseline comparison.
+          nullable: true
+          description: Rolling historical average queue count for baseline comparison (null if collecting baseline).
           example: 8.4
         rolling30dAvgWaitHours:
           type: number
           format: float
-          minimum: 0
-          description: Rolling 30-day historical average waiting time in hours.
+          nullable: true
+          description: Rolling historical average waiting time in hours (null if collecting baseline).
           example: 12.0
 
     TerminalMetrics:
