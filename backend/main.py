@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from backend.auth.router import router as auth_router
+from backend.ports.router import router as ports_router
 from backend.taxonomy.router import router as taxonomy_router
 
 app = FastAPI(
@@ -34,6 +35,8 @@ app.include_router(taxonomy_router, prefix="/api/v1")
 app.include_router(taxonomy_router)
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(auth_router)
+app.include_router(ports_router, prefix="/api/v1")
+app.include_router(ports_router)
 
 
 class HealthResponse(BaseModel):
