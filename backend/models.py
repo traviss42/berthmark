@@ -225,9 +225,13 @@ class AlertLog(Base):
     vessel_class_id: Mapped[str] = mapped_column(
         String(20), ForeignKey("vessel_classes.class_id", ondelete="CASCADE"), nullable=False
     )
+    type: Mapped[str] = mapped_column(String(20), default="stateChange", nullable=False)
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
     previous_risk_level: Mapped[str | None] = mapped_column(String(10), nullable=True)
     new_risk_level: Mapped[str | None] = mapped_column(String(10), nullable=True)
     trigger_reason: Mapped[str] = mapped_column(Text, nullable=False)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
     )

@@ -8,6 +8,11 @@ from backend.schemas.metrics import (
     TerminalMetrics,
     WeatherMetrics,
 )
+from backend.schemas.notification import (
+    Notification,
+    NotificationCreate,
+    NotificationType,
+)
 from backend.schemas.recommendation import (
     AlternativePortRecommendation,
     PortRecommendation,
@@ -26,6 +31,9 @@ __all__ = [
     "BulkRiskPortItem",
     "CongestionMetrics",
     "NavigationalMetrics",
+    "Notification",
+    "NotificationCreate",
+    "NotificationType",
     "PortMetrics",
     "PortRecommendation",
     "RiskAssessment",

@@ -255,6 +255,7 @@ async def persist_risk_assessment(
             f"for {vessel_label}. " + "; ".join(active_factors[:2])
         )
 
+        title = f"{port.port_name}: Risk tier changed to {new_risk_level.capitalize()}"
         for uid in target_user_ids:
             alerts.append(
                 AlertLog(
@@ -262,9 +263,13 @@ async def persist_risk_assessment(
                     user_id=uid,
                     unlocode=port.unlocode,
                     vessel_class_id=vessel_class,
+                    type="stateChange",
+                    title=title,
+                    message=reason,
                     previous_risk_level=previous_risk_level,
                     new_risk_level=new_risk_level,
                     trigger_reason=reason,
+                    is_read=False,
                     created_at=eval_time,
                 )
             )
