@@ -11,11 +11,11 @@ import type {
 // The mock implementations satisfy the same contracts.
 
 export interface IPortService {
-  getPorts(userId: string): Promise<Port[]>;
+  getPorts(userId?: string): Promise<Port[]>;
   getDefaultPorts(): Promise<Port[]>;
   searchPorts(query: string): Promise<Port[]>;
-  addPort(port: Omit<Port, 'id' | 'isDefault' | 'addedByUserId'>, userId: string): Promise<Port>;
-  removePort(portId: string, userId: string): Promise<void>;
+  addPort(port: Omit<Port, 'id' | 'isDefault' | 'addedByUserId'>, userId?: string): Promise<Port>;
+  removePort(portId: string, userId?: string): Promise<void>;
 }
 
 export interface IRiskService {
@@ -28,15 +28,15 @@ export interface IRiskService {
 }
 
 export interface INotificationService {
-  getNotifications(userId: string): Promise<Notification[]>;
+  getNotifications(userId?: string, unreadOnly?: boolean, limit?: number): Promise<Notification[]>;
   markAsRead(notificationId: string): Promise<void>;
-  markAllAsRead(userId: string): Promise<void>;
+  markAllAsRead(userId?: string): Promise<void>;
   generateStateChangeAlert(
     portId: string,
     portName: string,
     newTier: Notification['tier'],
     previousTier: Notification['tier'] | null
-  ): Notification;
+  ): Promise<Notification> | Notification;
 }
 
 export interface IServices {

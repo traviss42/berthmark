@@ -17,7 +17,12 @@ export function usePorts() {
       const data = await services.ports.getPorts(MOCK_USER_ID);
       setPorts(data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load ports');
+      try {
+        const defaultData = await services.ports.getDefaultPorts();
+        setPorts(defaultData);
+      } catch {
+        setError(e instanceof Error ? e.message : 'Failed to load ports');
+      }
     } finally {
       setLoading(false);
     }

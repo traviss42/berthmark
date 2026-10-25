@@ -1,22 +1,37 @@
-import { useState, useMemo, useCallback } from 'react';
-import { Bell, Globe, RefreshCw, Activity, AlertTriangle } from 'lucide-react';
+import React, { useState, useMemo, useCallback } from 'react';
+import {
+  Bell,
+  Globe,
+  RefreshCw,
+  Activity,
+  AlertTriangle,
+  LogOut,
+  LogIn,
+  X,
+} from 'lucide-react';
 import type { VesselClass } from '@/types';
 import { usePorts, useRiskAssessments, useNotifications } from '@/hooks/useServices';
+import { AuthProvider, useAuth } from '@/context/AuthContext';
+import { LoginForm } from '@/components/LoginForm';
 import { PortList } from '@/components/PortList';
 import { PortSearch } from '@/components/PortSearch';
 import { PortRiskDetail } from '@/components/PortRiskDetail';
 import { VesselClassSelector } from '@/components/VesselClassSelector';
 import { NotificationPanel } from '@/components/NotificationPanel';
-import { getServices } from '@/services';
 
-export default function App() {
+function AppContent() {
+  const { user, isAuthenticated, logout } = useAuth();
   const { ports, loading: portsLoading, addPort, removePort } = usePorts();
   const [vesselClass, setVesselClass] = useState<VesselClass>('neoPanamax');
   const [selectedPortId, setSelectedPortId] = useState<string | null>(null);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  const { assessments, loading: riskLoading, refresh: refreshRisk } = useRiskAssessments(ports, vesselClass);
+  const { assessments, loading: riskLoading, refresh: refreshRisk } = useRiskAssessments(
+    ports,
+    vesselClass
+  );
   const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
 
   const assessmentMap = useMemo(() => {
@@ -73,6 +88,17 @@ export default function App() {
 
   const existingLocodes = useMemo(() => ports.map((p) => p.locode), [ports]);
 
+  const handleAddPortWithAuth = useCallback(
+    async (portData: any) => {
+      if (!isAuthenticated) {
+        setShowLoginModal(true);
+        return;
+      }
+      return addPort(portData);
+    },
+    [isAuthenticated, addPort]
+  );
+
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Header */}
@@ -85,7 +111,9 @@ export default function App() {
               </div>
               <div>
                 <h1 className="text-base font-bold text-slate-900">Port-Call Risk Tracker</h1>
-                <p className="text-xs text-slate-500 hidden sm:block">Monitoring & Assessment Tool</p>
+                <p className="text-xs text-slate-500 hidden sm:block">
+                  Maritime Port-Call Intelligence
+                </p>
               </div>
             </div>
 
@@ -94,9 +122,44 @@ export default function App() {
                 <Globe className="w-4 h-4 text-slate-400" />
                 <span className="text-slate-600">{ports.length} ports tracked</span>
               </div>
+
+              {isAuthenticated ? (
+                <div className="flex items-center gap-2">
+                  <span
+                    data-testid="user-display"
+                    className="text-xs font-semibold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200"
+                  >
+                    {user?.name || user?.email}
+                  </span>
+                  <button
+                    onClick={logout}
+                    aria-label="Sign Out"
+                    className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-slate-900 px-2.5 py-1.5 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span>Sign Out</span>
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowLoginModal(true)}
+                  className="flex items-center gap-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  <span>Sign In</span>
+                </button>
+              )}
+
               <button
-                onClick={() => setShowNotifications(!showNotifications)}
-                className="relative p-2 rounded-lg hover:bg-slate-100 transition-colors"
+                onClick={() => {
+                  if (!isAuthenticated) {
+                    setShowLoginModal(true);
+                  } else {
+                    setShowNotifications(!showNotifications);
+                  }
+                }}
+                className="relative p-2 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
+                aria-label="Notifications"
               >
                 <Bell className="w-5 h-5 text-slate-600" />
                 {unreadCount > 0 && (
@@ -110,10 +173,40 @@ export default function App() {
         </div>
       </header>
 
+      {/* Login Modal */}
+      {showLoginModal && !isAuthenticated && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4"
+          onClick={() => setShowLoginModal(false)}
+        >
+          <div
+            className="relative w-full max-w-md"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setShowLoginModal(false)}
+              className="absolute right-4 top-4 p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 z-10 cursor-pointer"
+              aria-label="Close"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <LoginForm onSuccess={() => setShowLoginModal(false)} />
+          </div>
+        </div>
+      )}
+
       {/* Notification dropdown */}
-      {showNotifications && (
-        <div className="fixed inset-0 z-40" onClick={() => setShowNotifications(false)}>
-          <div className="absolute right-4 top-16 z-50" onClick={(e) => e.stopPropagation()}>
+      {showNotifications && isAuthenticated && (
+        <div
+          className="fixed inset-0 z-40"
+          onClick={() => setShowNotifications(false)}
+        >
+          <div
+            className="absolute right-4 top-16 z-50"
+            onClick={(e) => e.stopPropagation()}
+          >
             <NotificationPanel
               notifications={notifications}
               onMarkAsRead={markAsRead}
@@ -126,6 +219,22 @@ export default function App() {
 
       {/* Main content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {!isAuthenticated && (
+          <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between">
+            <div className="text-xs text-blue-900">
+              <span className="font-semibold">Guest View:</span> Currently viewing
+              default benchmark ports. Sign in to manage your private watchlist and
+              receive operational risk alerts.
+            </div>
+            <button
+              onClick={() => setShowLoginModal(true)}
+              className="text-xs font-semibold text-blue-700 hover:text-blue-900 underline ml-4 shrink-0 cursor-pointer"
+            >
+              Sign In
+            </button>
+          </div>
+        )}
+
         {selectedAssessment && selectedPort ? (
           <PortRiskDetail
             assessment={selectedAssessment}
@@ -168,16 +277,23 @@ export default function App() {
             {/* Controls Bar */}
             <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
               <div className="flex-1 w-full max-w-md">
-                <PortSearch onAddPort={addPort} existingLocodes={existingLocodes} />
+                <PortSearch
+                  onAddPort={handleAddPortWithAuth}
+                  existingLocodes={existingLocodes}
+                />
               </div>
               <div className="flex items-center gap-2">
                 <VesselClassSelector value={vesselClass} onChange={setVesselClass} />
                 <button
                   onClick={handleRefresh}
                   disabled={refreshing || riskLoading}
-                  className="flex items-center gap-1.5 text-sm px-3 py-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                  className="flex items-center gap-1.5 text-sm px-3 py-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 transition-colors cursor-pointer"
                 >
-                  <RefreshCw className={`w-4 h-4 text-slate-500 ${refreshing ? 'animate-spin' : ''}`} />
+                  <RefreshCw
+                    className={`w-4 h-4 text-slate-500 ${
+                      refreshing ? 'animate-spin' : ''
+                    }`}
+                  />
                 </button>
               </div>
             </div>
@@ -188,7 +304,11 @@ export default function App() {
                 <h2 className="text-sm font-semibold text-slate-700">
                   Monitored Ports
                   <span className="ml-2 text-xs font-normal text-slate-400">
-                    Risk evaluated for {vesselClass.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase())} class
+                    Risk evaluated for{' '}
+                    {vesselClass
+                      .replace(/([A-Z])/g, ' $1')
+                      .replace(/^./, (c) => c.toUpperCase())}{' '}
+                    class
                   </span>
                 </h2>
               </div>
@@ -204,16 +324,25 @@ export default function App() {
             <div className="rounded-lg bg-slate-100 border border-slate-200 p-4">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs text-slate-600">
                 <div>
-                  <div className="font-semibold text-slate-700 mb-1">Evaluation Cycle</div>
-                  Risk scores re-evaluated every 6 hours with anti-flapping cooldown logic.
+                  <div className="font-semibold text-slate-700 mb-1">
+                    Evaluation Cycle
+                  </div>
+                  Risk scores re-evaluated every 6 hours with anti-flapping cooldown
+                  logic.
                 </div>
                 <div>
-                  <div className="font-semibold text-slate-700 mb-1">Composite Scoring</div>
-                  Weakest-link rule: any sub-risk reaching High elevates the composite to High.
+                  <div className="font-semibold text-slate-700 mb-1">
+                    Composite Scoring
+                  </div>
+                  Weakest-link rule: any sub-risk reaching High elevates the composite
+                  to High.
                 </div>
                 <div>
-                  <div className="font-semibold text-slate-700 mb-1">Safety Standards</div>
-                  Weather and navigational thresholds follow PIANC Report 121 guidelines.
+                  <div className="font-semibold text-slate-700 mb-1">
+                    Safety Standards
+                  </div>
+                  Weather and navigational thresholds follow PIANC Report 121
+                  guidelines.
                 </div>
               </div>
             </div>
@@ -221,6 +350,14 @@ export default function App() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }
 
@@ -245,7 +382,9 @@ function SummaryCard({
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 flex items-center gap-4">
-      <div className={`w-11 h-11 rounded-lg flex items-center justify-center ${c.bg} ${c.icon}`}>
+      <div
+        className={`w-11 h-11 rounded-lg flex items-center justify-center ${c.bg} ${c.icon}`}
+      >
         {icon}
       </div>
       <div>

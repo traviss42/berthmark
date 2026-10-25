@@ -158,3 +158,36 @@ export interface RiskThresholds {
     airDraftClearanceMediumM: number;
   };
 }
+
+// ── Authentication & User models ──
+
+export interface User {
+  id: string;
+  email: string;
+  name?: string;
+  createdAt?: string;
+}
+
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+export interface AuthResponse {
+  accessToken: string;
+  tokenType: string;
+  expiresIn?: number;
+  user: User;
+}
+
+export interface ErrorResponse {
+  error: string;
+  message: string;
+  statusCode: number;
+}
+
+export interface ApiError extends Error {
+  error: string;
+  statusCode: number;
+}
+
