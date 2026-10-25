@@ -15,6 +15,7 @@ from backend.services.risk_engine import (
     VALID_VESSEL_CLASSES,
     calculate_bulk_risk,
     calculate_port_risk,
+    get_historical_risk_trend,
 )
 
 logger = logging.getLogger(__name__)
@@ -186,6 +187,76 @@ async def bulk_risk_assessment(
             detail={
                 "error": "Internal Server Error",
                 "message": f"Failed to execute bulk risk assessment: {str(exc)}",
+                "statusCode": 500,
+            },
+        )
+
+
+@router.get(
+    "/ports/{portId}/risk/history",
+    response_model=list[RiskAssessment],
+    summary="Get historical risk trend curve",
+    responses={
+        200: {"description": "Historical time-series trend data.", "model": list[RiskAssessment]},
+        400: {"description": "Invalid request parameters.", "model": ErrorResponse},
+        404: {"description": "Port not found.", "model": ErrorResponse},
+        500: {"description": "Internal server error.", "model": ErrorResponse},
+    },
+)
+async def get_port_risk_history(
+    portId: str,
+    vesselClass: str = Query(..., description="Target vessel benchmark class."),
+    days: int = Query(7, description="Number of days of historical trend data to fetch."),
+    session: AsyncSession = Depends(get_db_session),
+) -> list[RiskAssessment]:
+    """Retrieve chronological time-series risk evaluations sampled periodically, capped at 40 points."""
+    if vesselClass not in VALID_VESSEL_CLASSES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "Bad Request",
+                "message": f"Invalid vesselClass '{vesselClass}'. Must be one of: {sorted(list(VALID_VESSEL_CLASSES))}",
+                "statusCode": 400,
+            },
+        )
+
+    if not (1 <= days <= 30):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "Bad Request",
+                "message": f"Query parameter 'days' must be between 1 and 30, got {days}.",
+                "statusCode": 400,
+            },
+        )
+
+    port, canonical_port_id, canonical_port_name = await resolve_port_entity(session, portId)
+
+    try:
+        return await get_historical_risk_trend(
+            session=session,
+            port=port,
+            vessel_class=vesselClass,
+            days=days,
+            port_id=canonical_port_id,
+            port_name=canonical_port_name,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "Bad Request",
+                "message": str(exc),
+                "statusCode": 400,
+            },
+        )
+    except Exception as exc:
+        logger.exception("Failed to fetch historical risk trend for port %s, vessel %s: %s", portId, vesselClass, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": "Internal Server Error",
+                "message": f"Failed to retrieve risk history: {str(exc)}",
                 "statusCode": 500,
             },
         )

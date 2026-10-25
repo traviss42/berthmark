@@ -1,7 +1,7 @@
 """Weakest-Link Composite Risk Engine and Assessment Service."""
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import logging
 from typing import Any
 import uuid
@@ -644,4 +644,155 @@ async def calculate_bulk_risk(
     tasks = [evaluate_item(item, port) for item, port in resolved_pairs]
     results = await asyncio.gather(*tasks)
     return list(results)
+
+
+def snapshot_to_risk_assessment(
+    snapshot: PortRiskSnapshot,
+    port_id: str,
+    port_name: str,
+) -> RiskAssessment:
+    """Convert an existing PortRiskSnapshot record into a schema-compliant RiskAssessment object."""
+    ts = snapshot.updated_at
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    ts_str = ts.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    vessel_class = snapshot.vessel_class_id
+    vessel_label = VESSEL_CLASS_LABELS.get(vessel_class, vessel_class)
+
+    cong_tier = (snapshot.congestion_risk_level or "LOW").lower()
+    nav_tier = (snapshot.grounding_risk_level or "LOW").lower()
+    wx_tier = (snapshot.weather_risk_level or "LOW").lower()
+    term_tier = cong_tier
+
+    comp_tier: RiskTier = (snapshot.overall_risk_level or "LOW").lower()  # type: ignore[assignment]
+    comp_score = TIER_SCORES.get(comp_tier, 25.0)
+
+    congestion_sr = SubRiskResult(
+        category="congestion",
+        tier=cong_tier,  # type: ignore[arg-type]
+        score=TIER_SCORES.get(cong_tier, 25.0),
+        detail=f"Historical queue: {snapshot.anchored_vessel_count} anchored ({snapshot.queue_variance_pct:+.1f}% vs baseline).",
+        factors=[f"Anchored vessel count {snapshot.anchored_vessel_count}."],
+    )
+    terminal_sr = SubRiskResult(
+        category="terminalDelays",
+        tier=term_tier,  # type: ignore[arg-type]
+        score=TIER_SCORES.get(term_tier, 25.0),
+        detail=f"Terminal processing status at {term_tier} tier.",
+        factors=["Turnaround and dwell time indicators."],
+    )
+    weather_sr = SubRiskResult(
+        category="weather",
+        tier=wx_tier,  # type: ignore[arg-type]
+        score=TIER_SCORES.get(wx_tier, 25.0),
+        detail=f"Historical marine swell {snapshot.swell_height_m or 0.0:.1f}m, wind {snapshot.wind_speed_kts or 0.0:.1f} kts.",
+        factors=[f"Wave height {snapshot.swell_height_m or 0.0:.1f}m."],
+    )
+    navigational_sr = SubRiskResult(
+        category="navigational",
+        tier=nav_tier,  # type: ignore[arg-type]
+        score=TIER_SCORES.get(nav_tier, 25.0),
+        detail=f"Historical under-keel clearance at {nav_tier} tier.",
+        factors=["Bathymetric channel and swell clearance."],
+    )
+
+    sub_risks = SubRisksDict(
+        congestion=congestion_sr,
+        terminalDelays=terminal_sr,
+        weather=weather_sr,
+        navigational=navigational_sr,
+    )
+
+    metrics = PortMetrics(
+        portId=port_id,
+        timestamp=ts,
+        congestion=CongestionMetrics(
+            anchorageQueueCount=snapshot.anchored_vessel_count,
+            avgWaitingTimeHours=round(max(0.0, snapshot.anchored_vessel_count * 1.5), 1),
+            berthOccupancyPct=round(min(100.0, max(20.0, snapshot.anchored_vessel_count * 5.0)), 1),
+            rolling30dAvgQueue=snapshot.historical_avg_queue,
+            rolling30dAvgWaitHours=12.0,
+        ),
+        terminal=TerminalMetrics(
+            berthTurnaroundHours=24.0 if term_tier == "low" else (36.0 if term_tier == "medium" else 52.0),
+            berthToAnchorageWaitRatio=1.5,
+            dwellTimeAnomalyScore=30.0 if term_tier == "low" else (55.0 if term_tier == "medium" else 80.0),
+            rolling30dAvgTurnaround=22.0,
+        ),
+        weather=WeatherMetrics(
+            windSpeedKnots=snapshot.wind_speed_kts or 10.0,
+            waveHeightM=snapshot.swell_height_m or 0.8,
+            swellPeriodSec=6.0,
+            visibilityNm=10.0,
+            gustSpeedKnots=(snapshot.wind_speed_kts or 10.0) * 1.3,
+        ),
+        navigational=NavigationalMetrics(
+            underKeelClearanceM=2.5 if nav_tier == "low" else (0.5 if nav_tier == "medium" else -0.5),
+            channelDepthM=15.0,
+            airDraftClearanceM=8.0,
+            pilotageAvailable=True,
+            tideHeightM=0.0,
+        ),
+    )
+
+    assessment_id = f"risk-{port_id}-{vessel_class}-{ts_str}"
+
+    return RiskAssessment(
+        id=assessment_id,
+        portId=port_id,
+        portName=port_name,
+        vesselClass=vessel_class,
+        vesselClassLabel=vessel_label,
+        timestamp=ts,
+        compositeTier=comp_tier,
+        compositeScore=comp_score,
+        subRisks=sub_risks,
+        metrics=metrics,
+    )
+
+
+async def get_historical_risk_trend(
+    session: AsyncSession,
+    port: Port,
+    vessel_class: str,
+    days: int = 7,
+    port_id: str | None = None,
+    port_name: str | None = None,
+) -> list[RiskAssessment]:
+    """Retrieve chronological time-series risk evaluations capped at 40 points in ascending order."""
+    if vessel_class not in VALID_VESSEL_CLASSES:
+        raise ValueError(f"Invalid vesselClass '{vessel_class}'. Must be one of: {sorted(list(VALID_VESSEL_CLASSES))}")
+
+    if not (1 <= days <= 30):
+        raise ValueError(f"Query parameter 'days' must be between 1 and 30, got {days}.")
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    stmt = (
+        select(PortRiskSnapshot)
+        .where(
+            PortRiskSnapshot.unlocode == port.unlocode,
+            PortRiskSnapshot.vessel_class_id == vessel_class,
+            PortRiskSnapshot.updated_at >= cutoff,
+        )
+        .order_by(PortRiskSnapshot.updated_at.asc())
+    )
+    res = await session.execute(stmt)
+    snapshots = list(res.scalars().all())
+
+    if not snapshots:
+        return []
+
+    # If > 40 data points, cap to the 40 most recent evaluation points
+    if len(snapshots) > 40:
+        snapshots = snapshots[-40:]
+
+    canonical_port_id = port_id or f"port-{port.unlocode.lower()}"
+    canonical_port_name = port_name or port.port_name
+
+    return [
+        snapshot_to_risk_assessment(s, canonical_port_id, canonical_port_name)
+        for s in snapshots
+    ]
+
 
