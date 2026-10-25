@@ -1,7 +1,9 @@
 """Berthmark API server main application entry point."""
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from backend.auth.router import router as auth_router
 from backend.taxonomy.router import router as taxonomy_router
 
 app = FastAPI(
@@ -11,9 +13,27 @@ app = FastAPI(
     openapi_url="/openapi.json",
 )
 
-# Mount taxonomy routes under /api/v1 and root
+
+@app.exception_handler(HTTPException)
+async def custom_http_exception_handler(request: Request, exc: HTTPException):
+    """Normalize HTTPException responses to match ErrorResponse schema."""
+    if isinstance(exc.detail, dict) and "error" in exc.detail:
+        return JSONResponse(status_code=exc.status_code, content=exc.detail)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": "Error",
+            "message": str(exc.detail),
+            "statusCode": exc.status_code,
+        },
+    )
+
+
+# Mount routes under /api/v1 and root
 app.include_router(taxonomy_router, prefix="/api/v1")
 app.include_router(taxonomy_router)
+app.include_router(auth_router, prefix="/api/v1")
+app.include_router(auth_router)
 
 
 class HealthResponse(BaseModel):
