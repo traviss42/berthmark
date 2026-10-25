@@ -34,8 +34,47 @@ tags:
     description: Benchmark vessel classes and PIANC threshold parameters
   - name: Authentication
     description: User session and token management
+  - name: Health
+    description: Service health check endpoints
 
 paths:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # HEALTH ENDPOINTS
+  # ─────────────────────────────────────────────────────────────────────────────
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Root health check
+      description: Returns health status of the application.
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheckResponse'
+              example:
+                status: healthy
+
+  /api/v1/health:
+    get:
+      tags:
+        - Health
+      summary: API v1 health check
+      description: Returns health status of API v1.
+      operationId: apiV1HealthCheck
+      responses:
+        '200':
+          description: API v1 is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheckResponse'
+              example:
+                status: healthy
+
   # ─────────────────────────────────────────────────────────────────────────────
   # PORTS ENDPOINTS
   # ─────────────────────────────────────────────────────────────────────────────
@@ -745,6 +784,16 @@ components:
             statusCode: 500
 
   schemas:
+    HealthCheckResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          description: Service health indicator.
+          example: healthy
+
     # ── Enums ──
     RiskTier:
       type: string
