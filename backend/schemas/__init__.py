@@ -8,6 +8,10 @@ from backend.schemas.metrics import (
     TerminalMetrics,
     WeatherMetrics,
 )
+from backend.schemas.recommendation import (
+    AlternativePortRecommendation,
+    PortRecommendation,
+)
 from backend.schemas.risk import (
     BulkRiskAssessmentRequest,
     BulkRiskPortItem,
@@ -17,11 +21,13 @@ from backend.schemas.risk import (
 )
 
 __all__ = [
+    "AlternativePortRecommendation",
     "BulkRiskAssessmentRequest",
     "BulkRiskPortItem",
     "CongestionMetrics",
     "NavigationalMetrics",
     "PortMetrics",
+    "PortRecommendation",
     "RiskAssessment",
     "RiskTier",
     "SubRiskResult",
