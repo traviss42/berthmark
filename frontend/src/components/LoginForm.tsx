@@ -4,10 +4,15 @@ import { Lock, Mail, AlertCircle, Loader2 } from 'lucide-react';
 
 export interface LoginFormProps {
   onSuccess?: () => void;
+  onSwitchToSignUp?: () => void;
   className?: string;
 }
 
-export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, className = '' }) => {
+export const LoginForm: React.FC<LoginFormProps> = ({
+  onSuccess,
+  onSwitchToSignUp,
+  className = '',
+}) => {
   const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -80,7 +85,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, className = '' 
               disabled={submitting}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="operator@maritimerisk.com"
+              placeholder="user@example.com"
               className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-slate-50 disabled:text-slate-400"
             />
           </div>
@@ -122,6 +127,20 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, className = '' 
             <span>Sign In</span>
           )}
         </button>
+
+        {onSwitchToSignUp && (
+          <div className="pt-2 text-center text-xs text-slate-500">
+            Don't have an account?{' '}
+            <button
+              type="button"
+              data-testid="switch-to-signup"
+              onClick={onSwitchToSignUp}
+              className="font-semibold text-blue-600 hover:text-blue-800 underline cursor-pointer"
+            >
+              Sign Up
+            </button>
+          </div>
+        )}
       </form>
     </div>
   );

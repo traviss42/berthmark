@@ -274,3 +274,126 @@ async def test_get_current_user_profile(auth_test_db):
         assert res_orphan.status_code == 401
 
     app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_register_user_success(auth_test_db):
+    """Verify POST /api/auth/register securely creates user, hashes password, and returns AuthResponse."""
+    async def override_get_db():
+        async with auth_test_db() as session:
+            yield session
+
+    app.dependency_overrides[get_db_session] = override_get_db
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Register new user via POST /api/auth/register
+        reg_payload = {
+            "name": "Jane Navigator",
+            "email": "jane.navigator@maritime.org",
+            "password": "SecurePassword123!",
+        }
+        res = await client.post("/api/auth/register", json=reg_payload)
+        assert res.status_code == 201
+
+        data = res.json()
+        assert "accessToken" in data
+        assert data["tokenType"] == "Bearer"
+        assert isinstance(data["expiresIn"], int)
+        assert data["user"]["email"] == "jane.navigator@maritime.org"
+        assert data["user"]["name"] == "Jane Navigator"
+        assert "createdAt" in data["user"]
+        assert "id" in data["user"]
+
+        token = data["accessToken"]
+
+        # Verify access token works with /auth/me
+        res_me = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+        assert res_me.status_code == 200
+        assert res_me.json()["email"] == "jane.navigator@maritime.org"
+
+        # Verify password in DB is bcrypt-hashed and not plain text
+        async with auth_test_db() as session:
+            db_user = await session.scalar(
+                select(User).where(User.email == "jane.navigator@maritime.org")
+            )
+            assert db_user is not None
+            assert db_user.hashed_password != "SecurePassword123!"
+            assert verify_password("SecurePassword123!", db_user.hashed_password) is True
+
+        # Verify user can log in with registered credentials
+        login_res = await client.post(
+            "/api/auth/login",
+            json={"email": "jane.navigator@maritime.org", "password": "SecurePassword123!"},
+        )
+        assert login_res.status_code == 200
+        assert login_res.json()["user"]["email"] == "jane.navigator@maritime.org"
+
+    app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_register_duplicate_email_conflict(auth_test_db):
+    """Verify POST /api/auth/register returns 409 Conflict when email is already registered."""
+    async def override_get_db():
+        async with auth_test_db() as session:
+            yield session
+
+    app.dependency_overrides[get_db_session] = override_get_db
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Initial registration
+        await client.post(
+            "/api/auth/register",
+            json={"name": "First User", "email": "captain@fleet.com", "password": "SecretPassword123!"},
+        )
+
+        # Duplicate registration with same email (case-insensitive)
+        dup_res = await client.post(
+            "/api/auth/register",
+            json={"name": "Duplicate User", "email": "CAPTAIN@fleet.com", "password": "AnotherPassword456!"},
+        )
+        assert dup_res.status_code == 409
+        dup_data = dup_res.json()
+        assert dup_data["error"] == "Conflict"
+        assert "already registered" in dup_data["message"]
+        assert dup_data["statusCode"] == 409
+
+    app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_register_validation_errors(auth_test_db):
+    """Verify POST /api/auth/register returns 400/422 for invalid inputs."""
+    async def override_get_db():
+        async with auth_test_db() as session:
+            yield session
+
+    app.dependency_overrides[get_db_session] = override_get_db
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Missing email
+        res1 = await client.post(
+            "/api/auth/register",
+            json={"name": "Test", "password": "Password123!"},
+        )
+        assert res1.status_code == 422
+
+        # Invalid email format
+        res2 = await client.post(
+            "/api/auth/register",
+            json={"name": "Test", "email": "invalid-email-format", "password": "Password123!"},
+        )
+        assert res2.status_code == 422
+
+        # Blank/empty password
+        res3 = await client.post(
+            "/api/auth/register",
+            json={"name": "Test", "email": "valid@email.com", "password": "   "},
+        )
+        assert res3.status_code == 400
+
+    app.dependency_overrides.clear()
+

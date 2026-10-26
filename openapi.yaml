@@ -683,6 +683,47 @@ paths:
   # ─────────────────────────────────────────────────────────────────────────────
   # AUTHENTICATION ENDPOINTS
   # ─────────────────────────────────────────────────────────────────────────────
+  /auth/register:
+    post:
+      tags:
+        - Authentication
+      summary: User registration
+      description: |
+        Registers a new user account, securely hashes credentials, and issues an access token.
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            example:
+              name: Ship Operations Manager
+              email: manager@maritimerisk.com
+              password: SecurePassword123!
+      responses:
+        '201':
+          description: User registered successfully and JWT access token issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '409':
+          description: Email already registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: Conflict
+                message: User with email 'manager@maritimerisk.com' is already registered.
+                statusCode: 409
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /auth/login:
     post:
       tags:
@@ -1456,6 +1497,28 @@ components:
           type: string
           format: date-time
           example: '2026-01-01T00:00:00Z'
+
+    RegisterRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        name:
+          type: string
+          nullable: true
+          description: User full name.
+          example: Ship Operations Manager
+        email:
+          type: string
+          format: email
+          description: User email address.
+          example: manager@maritimerisk.com
+        password:
+          type: string
+          format: password
+          description: Raw user password.
+          example: SecurePassword123!
 
     LoginRequest:
       type: object

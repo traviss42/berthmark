@@ -130,11 +130,10 @@ def test_dockerignore_and_env_templates():
 
 @pytest.mark.asyncio
 async def test_seeder_execution():
-    """Verify that unified seeder executes idempotently without errors."""
+    """Verify that unified seeder executes idempotently without hardcoded user accounts."""
     stats = await run_seeders()
     assert "vessel_classes" in stats
-    assert "default_user" in stats
-    assert stats["default_user"] == "operator@maritimerisk.com"
+    assert "default_user" not in stats
     assert "benchmark_ports" in stats
 
 

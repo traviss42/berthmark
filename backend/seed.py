@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-from backend.auth.seed import seed_default_user
 from backend.database import auto_init_database, get_session_factory
 from backend.ports.service import seed_benchmark_ports
 from backend.taxonomy.seed import seed_vessel_classes
@@ -12,7 +11,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
 
 
 async def run_seeders() -> dict[str, int | str]:
-    """Execute all idempotent database seeders."""
+    """Execute all idempotent database seeders without hardcoded user accounts."""
     # Ensure database tables exist and reference seed data is loaded
     await auto_init_database()
 
@@ -24,11 +23,6 @@ async def run_seeders() -> dict[str, int | str]:
         classes_count = await seed_vessel_classes(session)
         stats["vessel_classes"] = classes_count
         logger.info("Vessel classes seeded/verified: %d", classes_count)
-
-        logger.info("Seeding default operator user...")
-        user = await seed_default_user(session)
-        stats["default_user"] = user.email
-        logger.info("Default operator user verified: %s", user.email)
 
         logger.info("Seeding default benchmark ports...")
         ports_count = await seed_benchmark_ports(session)

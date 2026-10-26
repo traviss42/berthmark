@@ -75,9 +75,10 @@ async def custom_validation_exception_handler(request: Request, exc: RequestVali
     )
 
 
-# Mount routes under /api/v1 and root
+# Mount routes under /api, /api/v1 and root
 app.include_router(taxonomy_router, prefix="/api/v1")
 app.include_router(taxonomy_router)
+app.include_router(auth_router, prefix="/api")
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(auth_router)
 app.include_router(ports_router, prefix="/api/v1")

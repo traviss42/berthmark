@@ -6,7 +6,7 @@ import { LoginForm } from '@/components/LoginForm';
 import { AUTH_TOKEN_KEY } from '@/services/httpClient';
 
 function TestConsumer() {
-  const { user, token, isAuthenticated, loading, error, login, logout } = useAuth();
+  const { user, token, isAuthenticated, loading, error, login, register, logout } = useAuth();
 
   return (
     <div>
@@ -17,6 +17,9 @@ function TestConsumer() {
       <div data-testid="error-val">{error || 'NO_ERROR'}</div>
       <button onClick={() => login('operator@maritimerisk.com', 'SampleSecurePassword123!')}>
         Trigger Login
+      </button>
+      <button onClick={() => register('Jack Aubrey', 'captain@fleet.com', 'LuckyJack1805!')}>
+        Trigger Register
       </button>
       <button onClick={logout}>Trigger Logout</button>
     </div>
@@ -146,6 +149,52 @@ describe('AuthContext and LoginForm', () => {
     fireEvent.click(screen.getByText('Trigger Logout'));
     expect(screen.getByTestId('auth-status').textContent).toBe('ANONYMOUS');
     expect(localStorage.getItem(AUTH_TOKEN_KEY)).toBeNull();
+  });
+
+  it('register saves token to localStorage and authenticates', async () => {
+    globalThis.fetch = vi.fn().mockImplementation(async (url) => {
+      if (url.toString().includes('/auth/register')) {
+        return new Response(
+          JSON.stringify({
+            accessToken: 'registered-jwt-token-456',
+            tokenType: 'Bearer',
+            user: {
+              id: 'usr-new-001',
+              email: 'captain@fleet.com',
+              name: 'Jack Aubrey',
+            },
+          }),
+          { status: 201, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (url.toString().includes('/auth/me')) {
+        return new Response(
+          JSON.stringify({
+            id: 'usr-new-001',
+            email: 'captain@fleet.com',
+            name: 'Jack Aubrey',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      return new Response(null, { status: 404 });
+    });
+
+    render(
+      <AuthProvider>
+        <TestConsumer />
+      </AuthProvider>
+    );
+
+    fireEvent.click(screen.getByText('Trigger Register'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('auth-status').textContent).toBe('AUTHENTICATED');
+    });
+
+    expect(screen.getByTestId('token-val').textContent).toBe('registered-jwt-token-456');
+    expect(screen.getByTestId('user-email').textContent).toBe('captain@fleet.com');
+    expect(localStorage.getItem(AUTH_TOKEN_KEY)).toBe('registered-jwt-token-456');
   });
 
   it('LoginForm renders inputs and client-side validation', async () => {

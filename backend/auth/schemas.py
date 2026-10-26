@@ -10,6 +10,14 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1)
 
 
+class RegisterRequest(BaseModel):
+    """Payload for self-service user registration."""
+
+    name: str | None = Field(default=None, description="User full name.")
+    email: EmailStr = Field(..., description="User email address.")
+    password: str = Field(..., min_length=1, description="Raw user password.")
+
+
 class UserResponse(BaseModel):
     """User profile response payload matching OpenAPI schema."""
 

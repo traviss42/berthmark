@@ -199,9 +199,9 @@ async def test_auto_init_database_lifecycle():
             assert 15.5 <= ulcs.draft_m <= 16.5
             assert ulcs.beam_m == 59.0
 
-            # Verify default operator user was seeded
-            user = await session.scalar(select(User).where(User.email == "operator@maritimerisk.com"))
-            assert user is not None
+            # Verify no hardcoded seed accounts were created
+            user_count = await session.scalar(select(func.count(User.id)))
+            assert user_count == 0
 
         # 2. Subsequent boot check: COUNT > 0 skips seeding instantly
         seeded_again = await auto_init_database(engine)

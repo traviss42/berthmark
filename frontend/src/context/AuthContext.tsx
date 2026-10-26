@@ -22,6 +22,7 @@ export interface AuthContextType {
   loading: boolean;
   error: string | null;
   login: (email: string, password: string) => Promise<AuthResponse>;
+  register: (name: string, email: string, password: string) => Promise<AuthResponse>;
   logout: () => void;
 }
 
@@ -119,6 +120,32 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     []
   );
 
+  // Register action
+  const register = useCallback(
+    async (name: string, email: string, password: string): Promise<AuthResponse> => {
+      setLoading(true);
+      setError(null);
+      try {
+        const authData = await authService.register({ name, email, password });
+        setStoredToken(authData.accessToken);
+        setTokenState(authData.accessToken);
+        setUser(authData.user);
+        setIsAuthenticated(true);
+        return authData;
+      } catch (err: unknown) {
+        let msg = 'Registration failed';
+        if (err && typeof err === 'object' && 'message' in err && typeof (err as any).message === 'string') {
+          msg = (err as any).message;
+        }
+        setError(msg);
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    []
+  );
+
   const value: AuthContextType = {
     user,
     token,
@@ -126,6 +153,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     loading,
     error,
     login,
+    register,
     logout,
   };
 

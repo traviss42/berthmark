@@ -72,6 +72,7 @@ export interface RequestOptions extends RequestInit {
 
 const PUBLIC_ENDPOINT_PREFIXES = [
   '/auth/login',
+  '/auth/register',
   '/ports/default',
   '/ports/search',
   '/vessel-classes',

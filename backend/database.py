@@ -263,10 +263,6 @@ async def auto_init_database(engine: AsyncEngine | None = None) -> bool:
             if existing.scalar_one_or_none() is None:
                 session.add(VesselClass(**vc))
 
-        # 5. Seed default operator user for immediate login
-        from backend.auth.seed import seed_default_user
-        await seed_default_user(session)
-
         await session.commit()
         logger.info(
             "Bulk seeding successfully finished: %d ports, %d vessel classes inserted.",

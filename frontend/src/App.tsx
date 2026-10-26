@@ -15,6 +15,7 @@ import type { VesselClass } from '@/types';
 import { usePorts, useRiskAssessments, useNotifications } from '@/hooks/useServices';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { LoginForm } from '@/components/LoginForm';
+import { SignUpForm } from '@/components/SignUpForm';
 import { PortList } from '@/components/PortList';
 import { PortSearch } from '@/components/PortSearch';
 import { PortRiskDetail } from '@/components/PortRiskDetail';
@@ -24,13 +25,46 @@ import { InteractiveMap } from '@/components/InteractiveMap';
 
 function AppContent() {
   const { user, isAuthenticated, logout } = useAuth();
-  const { ports, loading: portsLoading, addPort, removePort } = usePorts();
+  const { ports, loading: portsLoading, addPort, removePort, refresh: refreshPorts } = usePorts();
+  const [currentPath, setCurrentPath] = useState<string>(() =>
+    typeof window !== 'undefined' ? window.location.pathname : '/'
+  );
   const [viewMode, setViewMode] = useState<'grid' | 'map'>('grid');
   const [vesselClass, setVesselClass] = useState<VesselClass>('neoPanamax');
   const [selectedPortId, setSelectedPortId] = useState<string | null>(null);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+
+  const navigate = useCallback((path: string) => {
+    if (typeof window !== 'undefined') {
+      window.history.pushState({}, '', path);
+      setCurrentPath(path);
+    }
+  }, []);
+
+  // Listen to popstate for browser navigation (back/forward)
+  useEffect(() => {
+    const handlePopState = () => {
+      setCurrentPath(typeof window !== 'undefined' ? window.location.pathname : '/');
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  // Redirect to dashboard if authenticated user navigates to /signup
+  useEffect(() => {
+    if (isAuthenticated && (currentPath === '/signup' || currentPath === '/signup/')) {
+      navigate('/');
+    }
+  }, [isAuthenticated, currentPath, navigate]);
+
+  // Refresh port data whenever auth state changes (e.g. after login/register)
+  useEffect(() => {
+    refreshPorts();
+  }, [isAuthenticated, refreshPorts]);
+
+  const isSignUpRoute = currentPath === '/signup' || currentPath === '/signup/';
 
   const { assessments, loading: riskLoading, refresh: refreshRisk } = useRiskAssessments(
     ports,
@@ -121,7 +155,11 @@ function AppContent() {
       <header className="sticky top-0 z-40 bg-white border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-3">
+            <div
+              className="flex items-center gap-3 cursor-pointer"
+              onClick={() => navigate('/')}
+              data-testid="header-brand-logo"
+            >
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-600 flex items-center justify-center shadow-sm">
                 <Activity className="w-5 h-5 text-white" />
               </div>
@@ -157,13 +195,23 @@ function AppContent() {
                   </button>
                 </div>
               ) : (
-                <button
-                  onClick={() => setShowLoginModal(true)}
-                  className="flex items-center gap-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
-                >
-                  <LogIn className="w-3.5 h-3.5" />
-                  <span>Sign In</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    data-testid="header-signin-btn"
+                    onClick={() => setShowLoginModal(true)}
+                    className="flex items-center gap-1.5 text-xs font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-100 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
+                  >
+                    <LogIn className="w-3.5 h-3.5" />
+                    <span>Sign In</span>
+                  </button>
+                  <button
+                    data-testid="header-signup-btn"
+                    onClick={() => navigate('/signup')}
+                    className="flex items-center gap-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg transition-colors cursor-pointer shadow-xs"
+                  >
+                    <span>Sign Up</span>
+                  </button>
+                </div>
               )}
 
               <button
@@ -206,7 +254,13 @@ function AppContent() {
             >
               <X className="w-5 h-5" />
             </button>
-            <LoginForm onSuccess={() => setShowLoginModal(false)} />
+            <LoginForm
+              onSuccess={() => setShowLoginModal(false)}
+              onSwitchToSignUp={() => {
+                setShowLoginModal(false);
+                navigate('/signup');
+              }}
+            />
           </div>
         </div>
       )}
@@ -234,34 +288,54 @@ function AppContent() {
 
       {/* Main content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {!isAuthenticated && (
-          <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between">
-            <div className="text-xs text-blue-900">
-              <span className="font-semibold">Guest View:</span> Currently viewing
-              default benchmark ports. Sign in to manage your private watchlist and
-              receive operational risk alerts.
-            </div>
-            <button
-              onClick={() => setShowLoginModal(true)}
-              className="text-xs font-semibold text-blue-700 hover:text-blue-900 underline ml-4 shrink-0 cursor-pointer"
-            >
-              Sign In
-            </button>
+        {isSignUpRoute ? (
+          <div className="max-w-md mx-auto py-8">
+            <SignUpForm
+              onSuccess={() => navigate('/')}
+              onSwitchToLogin={() => {
+                navigate('/');
+                setShowLoginModal(true);
+              }}
+            />
           </div>
-        )}
-
-        {selectedAssessment && selectedPort && viewMode !== 'map' ? (
-          <PortRiskDetail
-            assessment={selectedAssessment}
-            onBack={() => setSelectedPortId(null)}
-            onRemove={handleRemovePort}
-            canRemove={!selectedPort.isDefault}
-            onRefresh={handleRefreshDetail}
-            refreshing={refreshing}
-          />
         ) : (
-          <div className="space-y-6">
-            {/* Dashboard Summary */}
+          <>
+            {!isAuthenticated && (
+              <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between">
+                <div className="text-xs text-blue-900">
+                  <span className="font-semibold">Guest View:</span> Currently viewing
+                  default benchmark ports. Sign in or create an account to manage your private watchlist and
+                  receive operational risk alerts.
+                </div>
+                <div className="flex items-center gap-3 ml-4 shrink-0">
+                  <button
+                    onClick={() => setShowLoginModal(true)}
+                    className="text-xs font-semibold text-blue-700 hover:text-blue-900 underline cursor-pointer"
+                  >
+                    Sign In
+                  </button>
+                  <button
+                    onClick={() => navigate('/signup')}
+                    className="text-xs font-semibold text-blue-700 hover:text-blue-900 underline cursor-pointer"
+                  >
+                    Sign Up
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {selectedAssessment && selectedPort && viewMode !== 'map' ? (
+              <PortRiskDetail
+                assessment={selectedAssessment}
+                onBack={() => setSelectedPortId(null)}
+                onRemove={handleRemovePort}
+                canRemove={!selectedPort.isDefault}
+                onRefresh={handleRefreshDetail}
+                refreshing={refreshing}
+              />
+            ) : (
+              <div className="space-y-6">
+                {/* Dashboard Summary */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <SummaryCard
                 label="Ports Tracked"
@@ -410,6 +484,8 @@ function AppContent() {
             </div>
           </div>
         )}
+        </>
+      )}
       </main>
     </div>
   );
