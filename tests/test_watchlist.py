@@ -318,7 +318,7 @@ async def test_invalid_token_requests(watchlist_test_db):
 
 @pytest.mark.asyncio
 async def test_get_ports_empty_watchlist(watchlist_test_db):
-    """Verify authenticated user with no custom ports receives all 5 default benchmark ports."""
+    """Verify authenticated user with no custom ports receives an empty watchlist."""
     session_factory, user_a_id, _ = watchlist_test_db
 
     async def override_get_db():
@@ -336,11 +336,7 @@ async def test_get_ports_empty_watchlist(watchlist_test_db):
             res = await client.get("/api/v1/ports", headers=headers)
             assert res.status_code == 200
             ports = res.json()
-            assert len(ports) == 5
-            for p in ports:
-                assert p["isDefault"] is True
-                assert p["addedByUserId"] is None
-                assert p["locode"] in BENCHMARK_PORTS_METADATA
+            assert len(ports) == 0
     finally:
         app.dependency_overrides.clear()
 
@@ -383,11 +379,11 @@ async def test_add_custom_port_and_duplicate_conflict(watchlist_test_db):
             assert created["addedByUserId"] == str(user_a_id)
             assert created["id"].startswith("port-user-")
 
-            # 2. Verify GET /api/v1/ports returns 6 ports (5 defaults + 1 custom)
+            # 2. Verify GET /api/v1/ports returns 1 port (0 defaults + 1 custom)
             res_list = await client.get("/api/v1/ports", headers=headers)
             assert res_list.status_code == 200
             ports = res_list.json()
-            assert len(ports) == 6
+            assert len(ports) == 1
             custom = next(p for p in ports if p["locode"] == "ESVLC")
             assert custom["isDefault"] is False
             assert custom["addedByUserId"] == str(user_a_id)
@@ -509,13 +505,13 @@ async def test_multi_tenant_isolation(watchlist_test_db):
 
             # 3. User A only sees their custom port, not User B's
             list_a = (await client.get("/api/v1/ports", headers=headers_a)).json()
-            assert len(list_a) == 6
+            assert len(list_a) == 1
             assert any(p["id"] == port_a["id"] for p in list_a)
             assert not any(p["id"] == port_b["id"] for p in list_a)
 
             # 4. User B only sees their custom port, not User A's
             list_b = (await client.get("/api/v1/ports", headers=headers_b)).json()
-            assert len(list_b) == 6
+            assert len(list_b) == 1
             assert any(p["id"] == port_b["id"] for p in list_b)
             assert not any(p["id"] == port_a["id"] for p in list_b)
 
@@ -536,9 +532,9 @@ async def test_multi_tenant_isolation(watchlist_test_db):
             assert del_ok.status_code == 204
             assert del_ok.content == b""
 
-            # Subsequent list confirms port_b is removed
+            # Subsequent list confirms port_b is removed (watchlist is now empty)
             list_b_post_del = (await client.get("/api/v1/ports", headers=headers_b)).json()
-            assert len(list_b_post_del) == 5
+            assert len(list_b_post_del) == 0
             assert not any(p["id"] == port_b["id"] for p in list_b_post_del)
 
             # User A's port is unaffected
@@ -641,7 +637,7 @@ async def test_selectinload_eager_loading(watchlist_test_db):
 
         # Query user monitored ports
         ports = await get_user_monitored_ports(session, user_a_id)
-        assert len(ports) == 6
+        assert len(ports) == 1
         leh = next(p for p in ports if p.locode == "FRLEH")
         assert leh.name == "Port du Havre"
         assert leh.isDefault is False

@@ -15,14 +15,10 @@ export function usePorts() {
     setError(null);
     try {
       const data = await services.ports.getPorts(MOCK_USER_ID);
-      setPorts(data);
+      setPorts(data || []);
     } catch (e) {
-      try {
-        const defaultData = await services.ports.getDefaultPorts();
-        setPorts(defaultData);
-      } catch {
-        setError(e instanceof Error ? e.message : 'Failed to load ports');
-      }
+      setPorts([]);
+      setError(e instanceof Error ? e.message : 'Failed to load ports');
     } finally {
       setLoading(false);
     }
@@ -98,9 +94,9 @@ export function useNotifications() {
     setLoading(true);
     try {
       const data = await services.notifications.getNotifications(MOCK_USER_ID);
-      setNotifications(data);
+      setNotifications(data || []);
     } catch {
-      // silent
+      setNotifications([]);
     } finally {
       setLoading(false);
     }

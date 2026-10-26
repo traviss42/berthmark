@@ -11,17 +11,14 @@ describe('MockPortService', () => {
     service = new MockPortService();
   });
 
-  it('returns default ports for a new user', async () => {
+  it('returns empty ports for a new user', async () => {
     const ports = await service.getPorts('user-1');
-    expect(ports.length).toBeGreaterThanOrEqual(DEFAULT_PORTS.length);
-    const defaultPorts = ports.filter((p) => p.isDefault);
-    expect(defaultPorts.length).toBe(DEFAULT_PORTS.length);
+    expect(ports).toHaveLength(0);
   });
 
-  it('getDefaultPorts returns only defaults', async () => {
+  it('getDefaultPorts returns empty array in user-driven model', async () => {
     const ports = await service.getDefaultPorts();
-    expect(ports).toHaveLength(DEFAULT_PORTS.length);
-    ports.forEach((p) => expect(p.isDefault).toBe(true));
+    expect(ports).toHaveLength(0);
   });
 
   it('searchPorts finds by name', async () => {

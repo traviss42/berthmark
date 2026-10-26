@@ -1,7 +1,8 @@
 import React from 'react';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { InteractiveMap } from '@/components/InteractiveMap';
+import { AUTH_TOKEN_KEY } from '@/services/httpClient';
 import App from '@/App';
 import type { Port, RiskAssessment } from '@/types';
 
@@ -314,6 +315,23 @@ describe('InteractiveMap Component', () => {
 });
 
 describe('Dashboard Grid vs Map View Toggle in App', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem(AUTH_TOKEN_KEY, 'test-jwt-token');
+    localStorage.setItem(
+      'berthmark_user',
+      JSON.stringify({
+        id: 'usr-test-1',
+        email: 'captain@fleet.com',
+        name: 'Captain Aubrey',
+      })
+    );
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+  });
+
   it('toggles between Card Grid and Map View seamlessly', () => {
     render(<App />);
 

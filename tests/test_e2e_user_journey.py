@@ -254,13 +254,11 @@ async def test_end_to_end_user_journey(e2e_test_db):
             # ─────────────────────────────────────────────────────────────────
             # STEP 3: Multi-Vessel Subscriptions & Constraint Enforcement
             # ─────────────────────────────────────────────────────────────────
-            # 3a. Initial state: authenticated user has only the 5 default benchmark ports
+            # 3a. Initial state: authenticated user starts with an empty watchlist (0 ports)
             initial_ports_res = await client.get("/api/v1/ports", headers=auth_headers)
             assert initial_ports_res.status_code == 200
             initial_ports = initial_ports_res.json()
-            assert len(initial_ports) == 5
-            for p in initial_ports:
-                assert p["isDefault"] is True
+            assert len(initial_ports) == 0
 
             # 3b. Port subscription #1: Rotterdam under VLCC
             res_sub1 = await client.post(
@@ -352,13 +350,13 @@ async def test_end_to_end_user_journey(e2e_test_db):
             assert dup_data["statusCode"] == 409
             assert "already in your watchlist" in dup_data["message"]
 
-            # 3g. Monitored list contains 5 defaults + 4 subscriptions = 9 entries
+            # 3g. Monitored list contains 0 defaults + 4 subscriptions = 4 entries
             res_all_monitored = await client.get("/api/v1/ports", headers=auth_headers)
             assert res_all_monitored.status_code == 200
             all_monitored = res_all_monitored.json()
-            assert len(all_monitored) == 9
+            assert len(all_monitored) == 4
 
-            rtm_subscriptions = [p for p in all_monitored if p["locode"] == "NLRTM" and not p["isDefault"]]
+            rtm_subscriptions = [p for p in all_monitored if p["locode"] == "NLRTM"]
             assert len(rtm_subscriptions) == 2
             vclasses = {p["vesselClass"] for p in rtm_subscriptions}
             assert vclasses == {"vlcc", "handysize"}

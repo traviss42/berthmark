@@ -4,6 +4,7 @@ import { render, screen, fireEvent, renderHook, act } from '@testing-library/rea
 import { NotificationPanel } from '@/components/NotificationPanel';
 import { useNotifications } from '@/hooks/useServices';
 import { setServices } from '@/services';
+import { AUTH_TOKEN_KEY } from '@/services/httpClient';
 import App from '@/App';
 import type { Notification } from '@/types';
 
@@ -190,6 +191,23 @@ describe('NotificationPanel Component', () => {
 });
 
 describe('Navigation Bell and Alert Feed Dropdown in App', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem(AUTH_TOKEN_KEY, 'test-jwt-token');
+    localStorage.setItem(
+      'berthmark_user',
+      JSON.stringify({
+        id: 'usr-test-1',
+        email: 'captain@fleet.com',
+        name: 'Captain Aubrey',
+      })
+    );
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+  });
+
   it('toggles notification panel dropdown and dismisses on outside click or Escape key', () => {
     render(<App />);
 

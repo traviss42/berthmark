@@ -248,9 +248,7 @@ async def get_port_by_id(session: AsyncSession, port_id: str) -> PortResponse | 
 async def get_user_monitored_ports(
     session: AsyncSession, user_id: uuid.UUID
 ) -> list[PortResponse]:
-    """Retrieve combined list of system default ports and user's custom watchlist ports."""
-    default_ports = await get_default_ports(session)
-
+    """Retrieve user's custom watchlist ports."""
     stmt = (
         select(UserWatchlist)
         .options(selectinload(UserWatchlist.port))
@@ -279,7 +277,7 @@ async def get_user_monitored_ports(
             )
         )
 
-    return default_ports + custom_ports
+    return custom_ports
 
 
 async def add_user_watchlist_port(

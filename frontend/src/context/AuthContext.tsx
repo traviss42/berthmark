@@ -32,16 +32,32 @@ export interface AuthProviderProps {
   children: React.ReactNode;
 }
 
+const USER_STORAGE_KEY = 'berthmark_user';
+
+const getStoredUser = (): User | null => {
+  try {
+    const raw = localStorage.getItem(USER_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [token, setTokenState] = useState<string | null>(() => getStoredToken());
-  const [user, setUser] = useState<User | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [user, setUser] = useState<User | null>(() => (getStoredToken() ? getStoredUser() : null));
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => !!getStoredToken());
+  const [loading, setLoading] = useState<boolean>(() => !!getStoredToken() && !getStoredUser());
   const [error, setError] = useState<string | null>(null);
 
   // Logout handler
   const logout = useCallback(() => {
     clearStoredToken();
+    try {
+      localStorage.removeItem(USER_STORAGE_KEY);
+    } catch {
+      // ignore storage errors
+    }
     setTokenState(null);
     setUser(null);
     setIsAuthenticated(false);
@@ -64,6 +80,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       .getCurrentUser()
       .then((userData) => {
         if (!isMounted) return;
+        try {
+          localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(userData));
+        } catch {
+          // ignore storage errors
+        }
         setUser(userData);
         setIsAuthenticated(true);
       })
@@ -71,6 +92,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         if (!isMounted) return;
         // If 401 or network failure, clear token and mark unauthenticated
         clearStoredToken();
+        try {
+          localStorage.removeItem(USER_STORAGE_KEY);
+        } catch {
+          // ignore
+        }
         setTokenState(null);
         setUser(null);
         setIsAuthenticated(false);
@@ -103,6 +129,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         const authData = await authService.login({ email, password });
         setStoredToken(authData.accessToken);
         setTokenState(authData.accessToken);
+        try {
+          localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(authData.user));
+        } catch {
+          // ignore
+        }
         setUser(authData.user);
         setIsAuthenticated(true);
         return authData;
@@ -129,6 +160,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         const authData = await authService.register({ name, email, password });
         setStoredToken(authData.accessToken);
         setTokenState(authData.accessToken);
+        try {
+          localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(authData.user));
+        } catch {
+          // ignore
+        }
         setUser(authData.user);
         setIsAuthenticated(true);
         return authData;

@@ -28,12 +28,12 @@ export class MockPortService implements IPortService {
   async getPorts(userId: string): Promise<Port[]> {
     await delay(150);
     const userAdded = this.userPorts.get(userId) ?? [];
-    return [...DEFAULT_PORTS, ...userAdded];
+    return [...userAdded];
   }
 
   async getDefaultPorts(): Promise<Port[]> {
     await delay(80);
-    return [...DEFAULT_PORTS];
+    return [];
   }
 
   async searchPorts(query: string): Promise<Port[]> {

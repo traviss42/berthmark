@@ -1,8 +1,10 @@
 import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import App from '@/App';
 import { setServices } from '@/services';
+import { AUTH_TOKEN_KEY } from '@/services/httpClient';
+import { authService } from '@/services/authService';
 import type { IPortService, IRiskService, INotificationService } from '@/services/interfaces';
 import type { Port, RiskAssessment, Notification, VesselClass } from '@/types';
 
@@ -12,6 +14,22 @@ describe('Frontend End-to-End User Journey (Issue 24)', () => {
   let mockAssessments: Record<string, RiskAssessment>;
 
   beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem(AUTH_TOKEN_KEY, 'mock-operator-jwt-token');
+    localStorage.setItem(
+      'berthmark_user',
+      JSON.stringify({
+        id: 'usr-e2e-operator',
+        email: 'operator@maritimerisk.com',
+        name: 'Ship Operations Manager',
+      })
+    );
+    vi.spyOn(authService, 'getCurrentUser').mockResolvedValue({
+      id: 'usr-e2e-operator',
+      email: 'operator@maritimerisk.com',
+      name: 'Ship Operations Manager',
+    });
+
     mockPorts = [
       {
         id: 'port-rotterdam',
@@ -329,6 +347,11 @@ describe('Frontend End-to-End User Journey (Issue 24)', () => {
       risk: mockRiskService,
       notifications: mockNotificationService,
     });
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+    vi.restoreAllMocks();
   });
 
   it('renders application header, tracked port count, and high-density card grid', async () => {
