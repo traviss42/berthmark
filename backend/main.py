@@ -1,21 +1,41 @@
 """Berthmark API server main application entry point."""
 
+import asyncio
+from contextlib import asynccontextmanager
+import logging
+import os
+import urllib.parse
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from backend.auth.router import router as auth_router
+from backend.database import auto_init_database, ping_database
 from backend.ports.router import router as ports_router
 from backend.routers.notifications import router as notifications_router
 from backend.routers.risk import router as risk_router
 from backend.taxonomy.router import router as taxonomy_router
+
+logger = logging.getLogger("backend.main")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan context: auto-initialize schema and seed database on boot."""
+    try:
+        await auto_init_database()
+    except Exception as exc:
+        logger.error("Database auto-initialization error on boot: %s", exc)
+    yield
+
 
 app = FastAPI(
     title="Berthmark Maritime Port-Call Risk Intelligence API",
     version="1.0.0",
     docs_url="/docs",
     openapi_url="/openapi.json",
+    lifespan=lifespan,
 )
 
 
@@ -65,11 +85,6 @@ app.include_router(ports_router)
 app.include_router(risk_router, prefix="/api/v1")
 app.include_router(risk_router)
 app.include_router(notifications_router, prefix="/api/v1")
-import asyncio
-import os
-import urllib.parse
-from backend.database import ping_database
-
 app.include_router(notifications_router)
 
 

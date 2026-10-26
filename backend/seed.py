@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from backend.auth.seed import seed_default_user
-from backend.database import get_session_factory
+from backend.database import auto_init_database, get_session_factory
 from backend.ports.service import seed_benchmark_ports
 from backend.taxonomy.seed import seed_vessel_classes
 
@@ -13,6 +13,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
 
 async def run_seeders() -> dict[str, int | str]:
     """Execute all idempotent database seeders."""
+    # Ensure database tables exist and reference seed data is loaded
+    await auto_init_database()
+
     session_factory = get_session_factory()
     stats: dict[str, int | str] = {}
 

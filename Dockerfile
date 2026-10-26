@@ -32,6 +32,9 @@ COPY alembic/ ./alembic/
 COPY backend/ ./backend/
 COPY openapi.yaml ./
 COPY docker-entrypoint.sh ./
+COPY app/ ./app/
+COPY data/ ./data/
+COPY scripts/ ./scripts/
 
 # Finalize dependency installation and ensure executable permissions
 RUN uv sync && chmod +x docker-entrypoint.sh
