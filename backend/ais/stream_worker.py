@@ -99,6 +99,13 @@ async def run_worker() -> None:
 def main() -> None:
     """Entrypoint function for stream worker."""
     try:
+        from dotenv import load_dotenv
+
+        load_dotenv()
+    except ImportError:
+        pass
+
+    try:
         asyncio.run(run_worker())
     except (KeyboardInterrupt, SystemExit):
         logger.info("Worker process exited.")
