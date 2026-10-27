@@ -62,12 +62,11 @@ class BulkRiskAssessmentRequest(BaseModel):
 
 
 class SubRisksDict(BaseModel):
-    """Container for the four operational sub-risk evaluation results."""
+    """Container for the three operational sub-risk evaluation results."""
 
     model_config = ConfigDict(populate_by_name=True)
 
     congestion: SubRiskResult
-    terminalDelays: SubRiskResult
     weather: SubRiskResult
     navigational: SubRiskResult
 

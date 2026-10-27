@@ -106,7 +106,7 @@ function AuthPortal({ currentPath, onNavigate }: AuthPortalProps) {
             Port-Call Risk Tracker
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            Real-time navigational, weather, congestion, and terminal risk intelligence
+            Real-time navigational, weather, and congestion risk intelligence
           </p>
 
           {/* Toggle Pills */}

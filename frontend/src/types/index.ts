@@ -4,7 +4,6 @@ export type RiskTier = 'low' | 'medium' | 'high';
 
 export type SubRiskCategory =
   | 'congestion'
-  | 'terminalDelays'
   | 'weather'
   | 'navigational';
 
@@ -89,9 +88,9 @@ export interface PortMetrics {
   portId: string;
   timestamp: string;
   congestion: CongestionMetrics;
-  terminal: TerminalMetrics;
   weather: WeatherMetrics;
   navigational: NavigationalMetrics;
+  terminal?: TerminalMetrics;
 }
 
 export interface SubRiskResult {

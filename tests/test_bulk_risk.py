@@ -139,7 +139,8 @@ async def test_bulk_risk_assessment_success_and_schema(bulk_test_db):
             assert 0.0 <= item["compositeScore"] <= 100.0
 
             sub = item["subRisks"]
-            for category in ["congestion", "terminalDelays", "weather", "navigational"]:
+            assert "terminalDelays" not in sub
+            for category in ["congestion", "weather", "navigational"]:
                 assert category in sub
                 assert sub[category]["category"] == category
                 assert sub[category]["tier"] in ["low", "medium", "high"]
@@ -149,7 +150,6 @@ async def test_bulk_risk_assessment_success_and_schema(bulk_test_db):
 
             metrics = item["metrics"]
             assert "congestion" in metrics
-            assert "terminal" in metrics
             assert "weather" in metrics
             assert "navigational" in metrics
 

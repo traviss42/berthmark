@@ -98,7 +98,8 @@ async def test_get_port_risk_success_and_schema_validation(risk_test_db):
 
         # Sub-risks validation
         sub = data["subRisks"]
-        for cat in ["congestion", "terminalDelays", "weather", "navigational"]:
+        assert "terminalDelays" not in sub
+        for cat in ["congestion", "weather", "navigational"]:
             assert cat in sub
             sr = sub[cat]
             assert sr["category"] == cat
@@ -112,7 +113,6 @@ async def test_get_port_risk_success_and_schema_validation(risk_test_db):
         assert m["portId"] == "port-rotterdam"
         assert "timestamp" in m
         assert "congestion" in m
-        assert "terminal" in m
         assert "weather" in m
         assert "navigational" in m
 

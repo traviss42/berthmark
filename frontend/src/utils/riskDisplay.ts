@@ -32,14 +32,12 @@ export const TIER_COLORS: Record<RiskTier, { bg: string; text: string; border: s
 
 export const CATEGORY_LABELS: Record<SubRiskCategory, string> = {
   congestion: 'Congestion',
-  terminalDelays: 'Terminal Delays',
   weather: 'Weather',
   navigational: 'Navigational',
 };
 
 export const CATEGORY_ICONS: Record<SubRiskCategory, string> = {
   congestion: 'Anchor',
-  terminalDelays: 'Clock',
   weather: 'CloudRain',
   navigational: 'Compass',
 };

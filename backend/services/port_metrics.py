@@ -1,4 +1,4 @@
-"""Unified 4-dimensional operational port metrics aggregator."""
+"""Unified operational port metrics aggregator."""
 
 from datetime import datetime, timezone
 from typing import Any
@@ -15,34 +15,32 @@ from backend.schemas.metrics import (
 def assemble_port_metrics(
     port_id: str,
     congestion: CongestionMetrics,
-    terminal: TerminalMetrics,
     weather: WeatherMetrics,
     navigational: NavigationalMetrics,
+    terminal: TerminalMetrics | None = None,
     timestamp: datetime | str | None = None,
 ) -> PortMetrics:
-    """Aggregate all 4 operational domains into a unified PortMetrics schema object.
+    """Aggregate operational domains into a unified PortMetrics schema object.
 
     Args:
         port_id: Unique port identifier (e.g. 'port-rotterdam').
         congestion: CongestionMetrics instance.
-        terminal: TerminalMetrics instance.
         weather: WeatherMetrics instance.
         navigational: NavigationalMetrics instance.
+        terminal: Optional TerminalMetrics instance.
         timestamp: Optional observation timestamp (defaults to current UTC).
 
     Returns:
         PortMetrics conforming to openapi.yaml.
 
     Raises:
-        ValueError: If port_id is empty or missing, or any sub-metric is None.
+        ValueError: If port_id is empty or missing, or required sub-metric is None.
     """
     if not port_id or not port_id.strip():
         raise ValueError("port_id cannot be empty or solely whitespace.")
 
     if congestion is None:
         raise ValueError("congestion metrics cannot be None.")
-    if terminal is None:
-        raise ValueError("terminal metrics cannot be None.")
     if weather is None:
         raise ValueError("weather metrics cannot be None.")
     if navigational is None:
@@ -62,7 +60,7 @@ def assemble_port_metrics(
         portId=port_id.strip(),
         timestamp=obs_time,
         congestion=congestion,
-        terminal=terminal,
         weather=weather,
         navigational=navigational,
+        terminal=terminal,
     )

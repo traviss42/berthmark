@@ -17,7 +17,6 @@ from backend.schemas.metrics import (
     NavigationalMetrics,
     PortMetrics,
     SubRiskResult,
-    TerminalMetrics,
     WeatherMetrics,
 )
 from backend.schemas.risk import BulkRiskPortItem, RiskAssessment, RiskTier, SubRisksDict
@@ -28,7 +27,6 @@ from backend.services.congestion import (
 )
 from backend.services.navigational import calculate_navigational_metrics
 from backend.services.port_metrics import assemble_port_metrics
-from backend.services.terminal import calculate_terminal_metrics, evaluate_terminal_delays
 from backend.services.weather import compute_weather_risk
 
 logger = logging.getLogger(__name__)
@@ -94,13 +92,12 @@ def determine_composite_tier(
     - Else if ANY sub-risk is 'medium', composite tier is 'medium'.
     - Else composite tier is 'low'.
 
-    compositeScore is the maximum score among all four sub-risks, bounded between 0.0 and 100.0,
+    compositeScore is the maximum score among all sub-risks, bounded between 0.0 and 100.0,
     and rounded to 1 decimal place.
     """
     if isinstance(sub_risks, SubRisksDict):
         results = [
             sub_risks.congestion,
-            sub_risks.terminalDelays,
             sub_risks.weather,
             sub_risks.navigational,
         ]
@@ -255,7 +252,7 @@ async def persist_risk_assessment(
         vessel_label = VESSEL_CLASS_LABELS.get(vessel_class, vessel_class)
         # Collect contributing high/medium factors
         active_factors = []
-        for sr in [sub_risks.congestion, sub_risks.terminalDelays, sub_risks.weather, sub_risks.navigational]:
+        for sr in [sub_risks.congestion, sub_risks.weather, sub_risks.navigational]:
             if sr.tier.upper() == new_risk_level:
                 active_factors.extend(sr.factors)
 
@@ -394,23 +391,7 @@ async def calculate_port_risk(
     congestion_subrisk = SubRiskResult(**congestion_assessment.to_subrisk_result())
     congestion_metrics = CongestionMetrics(**congestion_assessment.to_congestion_metrics())
 
-    # 3. Terminal domain
-    # Use standard benchmark values adjusted for congestion
-    base_turnaround = 24.0
-    rolling_turnaround = 22.0
-    if congestion_subrisk.tier == "high":
-        base_turnaround = 50.0
-    elif congestion_subrisk.tier == "medium":
-        base_turnaround = 32.0
-
-    terminal_metrics = calculate_terminal_metrics(
-        berth_turnaround_hours=base_turnaround,
-        avg_waiting_time_hours=congestion_metrics.avgWaitingTimeHours,
-        rolling_30d_avg_turnaround=rolling_turnaround,
-    )
-    terminal_subrisk = evaluate_terminal_delays(terminal_metrics)
-
-    # 4. Navigational domain
+    # 3. Navigational domain
     nav_metrics, nav_subrisk = calculate_navigational_metrics(
         vessel_class=vessel_class,
         channel_depth_m=port.channel_depth_m,
@@ -418,10 +399,9 @@ async def calculate_port_risk(
         wind_speed_knots=weather_metrics.windSpeedKnots,
     )
 
-    # 5. Assemble unified subrisks & metrics
+    # 4. Assemble unified subrisks & metrics
     sub_risks = SubRisksDict(
         congestion=congestion_subrisk,
-        terminalDelays=terminal_subrisk,
         weather=weather_subrisk,
         navigational=nav_subrisk,
     )
@@ -429,7 +409,6 @@ async def calculate_port_risk(
     unified_metrics = assemble_port_metrics(
         port_id=canonical_port_id,
         congestion=congestion_metrics,
-        terminal=terminal_metrics,
         weather=weather_metrics,
         navigational=nav_metrics,
         timestamp=ts,
@@ -633,18 +612,6 @@ async def calculate_bulk_risk(
         congestion_subrisk = SubRiskResult(**congestion_assessment.to_subrisk_result())
         congestion_metrics = CongestionMetrics(**congestion_assessment.to_congestion_metrics())
 
-        base_turnaround = (
-            50.0
-            if congestion_subrisk.tier == "high"
-            else (32.0 if congestion_subrisk.tier == "medium" else 24.0)
-        )
-        terminal_metrics = calculate_terminal_metrics(
-            berth_turnaround_hours=base_turnaround,
-            avg_waiting_time_hours=congestion_metrics.avgWaitingTimeHours,
-            rolling_30d_avg_turnaround=22.0,
-        )
-        terminal_subrisk = evaluate_terminal_delays(terminal_metrics)
-
         nav_metrics, nav_subrisk = calculate_navigational_metrics(
             vessel_class=vessel_class,
             channel_depth_m=port.channel_depth_m,
@@ -654,7 +621,6 @@ async def calculate_bulk_risk(
 
         sub_risks = SubRisksDict(
             congestion=congestion_subrisk,
-            terminalDelays=terminal_subrisk,
             weather=weather_subrisk,
             navigational=nav_subrisk,
         )
@@ -665,7 +631,6 @@ async def calculate_bulk_risk(
         unified_metrics = assemble_port_metrics(
             port_id=canonical_port_id,
             congestion=congestion_metrics,
-            terminal=terminal_metrics,
             weather=weather_metrics,
             navigational=nav_metrics,
             timestamp=ts,
@@ -702,7 +667,6 @@ def snapshot_to_risk_assessment(
     cong_tier = (snapshot.congestion_risk_level or "LOW").lower()
     nav_tier = (snapshot.grounding_risk_level or "LOW").lower()
     wx_tier = (snapshot.weather_risk_level or "LOW").lower()
-    term_tier = cong_tier
 
     comp_tier: RiskTier = (snapshot.overall_risk_level or "LOW").lower()  # type: ignore[assignment]
     comp_score = TIER_SCORES.get(comp_tier, 25.0)
@@ -713,13 +677,6 @@ def snapshot_to_risk_assessment(
         score=TIER_SCORES.get(cong_tier, 25.0),
         detail=f"Historical queue: {snapshot.anchored_vessel_count} anchored ({snapshot.queue_variance_pct:+.1f}% vs baseline).",
         factors=[f"Anchored vessel count {snapshot.anchored_vessel_count}."],
-    )
-    terminal_sr = SubRiskResult(
-        category="terminalDelays",
-        tier=term_tier,  # type: ignore[arg-type]
-        score=TIER_SCORES.get(term_tier, 25.0),
-        detail=f"Terminal processing status at {term_tier} tier.",
-        factors=["Turnaround and dwell time indicators."],
     )
     weather_sr = SubRiskResult(
         category="weather",
@@ -738,7 +695,6 @@ def snapshot_to_risk_assessment(
 
     sub_risks = SubRisksDict(
         congestion=congestion_sr,
-        terminalDelays=terminal_sr,
         weather=weather_sr,
         navigational=navigational_sr,
     )
@@ -752,12 +708,6 @@ def snapshot_to_risk_assessment(
             berthOccupancyPct=round(min(100.0, max(20.0, snapshot.anchored_vessel_count * 5.0)), 1),
             rolling30dAvgQueue=snapshot.historical_avg_queue,
             rolling30dAvgWaitHours=12.0,
-        ),
-        terminal=TerminalMetrics(
-            berthTurnaroundHours=24.0 if term_tier == "low" else (36.0 if term_tier == "medium" else 52.0),
-            berthToAnchorageWaitRatio=1.5,
-            dwellTimeAnomalyScore=30.0 if term_tier == "low" else (55.0 if term_tier == "medium" else 80.0),
-            rolling30dAvgTurnaround=22.0,
         ),
         weather=WeatherMetrics(
             windSpeedKnots=snapshot.wind_speed_kts or 10.0,

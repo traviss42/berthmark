@@ -53,7 +53,6 @@ const mockAssessmentRotterdamLow: RiskAssessment = {
   compositeScore: 25.0,
   subRisks: {
     congestion: { category: 'congestion', tier: 'low', score: 25.0, detail: 'Normal', factors: [] },
-    terminalDelays: { category: 'terminalDelays', tier: 'low', score: 25.0, detail: 'Normal', factors: [] },
     weather: { category: 'weather', tier: 'low', score: 25.0, detail: 'Normal', factors: [] },
     navigational: { category: 'navigational', tier: 'low', score: 25.0, detail: 'Normal', factors: [] },
   },

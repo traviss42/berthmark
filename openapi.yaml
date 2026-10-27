@@ -9,7 +9,7 @@ info:
     (`IPortService`, `IRiskService`, `INotificationService`, and `useServices` hooks):
     - **Port Management**: Default ports, user watchlist ports, global UN/LOCODE search, and custom port addition/removal.
     - **Risk Engine & Assessment**: Real-time evaluation of composite port risks and 4 sub-risk categories
-      (congestion, terminal delays, weather hazards, navigational clearance) based on PIANC guidelines and
+      (congestion, weather hazards, navigational clearance) based on PIANC guidelines and
       a 13-class vessel taxonomy. Includes bulk evaluation and 6-hour historical trend curves.
     - **Notifications & Alerting**: Real-time risk state-change alerts, unread counts, and read state management.
     - **Taxonomy & Metadata**: 13 standard commercial vessel classes across 4 operational sectors.
@@ -367,7 +367,7 @@ paths:
       summary: Get live risk assessment for a port and vessel class
       description: |
         Calculates and returns the composite risk assessment and sub-risk breakdowns
-        (congestion, terminal delays, weather, navigational) for a specific port evaluated
+        (congestion, weather, navigational) for a specific port evaluated
         against a specific benchmark vessel class (`IRiskService.getRiskAssessment`).
         Implements the Weakest-Link rule: any sub-risk reaching High elevates the composite to High.
       operationId: getRiskAssessment
@@ -866,7 +866,6 @@ components:
       type: string
       enum:
         - congestion
-        - terminalDelays
         - weather
         - navigational
       description: Operational risk sub-category.
@@ -1202,7 +1201,6 @@ components:
         - portId
         - timestamp
         - congestion
-        - terminal
         - weather
         - navigational
       properties:
@@ -1215,12 +1213,12 @@ components:
           example: '2026-10-19T03:00:00Z'
         congestion:
           $ref: '#/components/schemas/CongestionMetrics'
-        terminal:
-          $ref: '#/components/schemas/TerminalMetrics'
         weather:
           $ref: '#/components/schemas/WeatherMetrics'
         navigational:
           $ref: '#/components/schemas/NavigationalMetrics'
+        terminal:
+          $ref: '#/components/schemas/TerminalMetrics'
 
     SubRiskResult:
       type: object
@@ -1301,13 +1299,10 @@ components:
           type: object
           required:
             - congestion
-            - terminalDelays
             - weather
             - navigational
           properties:
             congestion:
-              $ref: '#/components/schemas/SubRiskResult'
-            terminalDelays:
               $ref: '#/components/schemas/SubRiskResult'
             weather:
               $ref: '#/components/schemas/SubRiskResult'

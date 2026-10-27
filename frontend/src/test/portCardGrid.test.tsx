@@ -36,13 +36,6 @@ const mockAssessmentLow: RiskAssessment = {
       detail: 'Normal congestion',
       factors: [],
     },
-    terminalDelays: {
-      category: 'terminalDelays',
-      tier: 'low',
-      score: 25.0,
-      detail: 'Normal',
-      factors: [],
-    },
     weather: {
       category: 'weather',
       tier: 'low',

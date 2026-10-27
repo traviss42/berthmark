@@ -48,15 +48,15 @@ def sample_metrics_bundle():
 
 
 def test_assemble_port_metrics_success(sample_metrics_bundle):
-    """Verify successful assembly of all 4 operational domains into PortMetrics."""
+    """Verify successful assembly of operational domains into PortMetrics."""
     congestion, terminal, weather, navigational = sample_metrics_bundle
 
     port_metrics = assemble_port_metrics(
         port_id="port-rotterdam",
         congestion=congestion,
-        terminal=terminal,
         weather=weather,
         navigational=navigational,
+        terminal=terminal,
         timestamp="2026-10-19T03:00:00Z",
     )
 
@@ -76,29 +76,43 @@ def test_assemble_port_metrics_success(sample_metrics_bundle):
     assert "navigational" in serialized
 
 
+def test_assemble_port_metrics_without_terminal(sample_metrics_bundle):
+    """Verify assembling PortMetrics cleanly without optional terminal metrics."""
+    congestion, _, weather, navigational = sample_metrics_bundle
+
+    port_metrics = assemble_port_metrics(
+        port_id="port-rotterdam",
+        congestion=congestion,
+        weather=weather,
+        navigational=navigational,
+    )
+
+    assert port_metrics.portId == "port-rotterdam"
+    assert port_metrics.terminal is None
+    assert port_metrics.congestion.anchorageQueueCount == 12
+    assert port_metrics.weather.windSpeedKnots == 24.5
+    assert port_metrics.navigational.channelDepthM == 16.5
+
+
 def test_assemble_port_metrics_validation_errors(sample_metrics_bundle):
-    """Verify validation error when portId is empty or any sub-metric is None."""
+    """Verify validation error when portId is empty or any required sub-metric is None."""
     congestion, terminal, weather, navigational = sample_metrics_bundle
 
     # Blank port_id
     with pytest.raises(ValueError):
-        assemble_port_metrics("", congestion, terminal, weather, navigational)
+        assemble_port_metrics("", congestion, weather, navigational)
 
     with pytest.raises(ValueError):
-        assemble_port_metrics("   ", congestion, terminal, weather, navigational)
+        assemble_port_metrics("   ", congestion, weather, navigational)
 
     # Missing congestion
     with pytest.raises(ValueError):
-        assemble_port_metrics("port-rotterdam", None, terminal, weather, navigational)
-
-    # Missing terminal
-    with pytest.raises(ValueError):
-        assemble_port_metrics("port-rotterdam", congestion, None, weather, navigational)
+        assemble_port_metrics("port-rotterdam", None, weather, navigational)
 
     # Missing weather
     with pytest.raises(ValueError):
-        assemble_port_metrics("port-rotterdam", congestion, terminal, None, navigational)
+        assemble_port_metrics("port-rotterdam", congestion, None, navigational)
 
     # Missing navigational
     with pytest.raises(ValueError):
-        assemble_port_metrics("port-rotterdam", congestion, terminal, weather, None)
+        assemble_port_metrics("port-rotterdam", congestion, weather, None)

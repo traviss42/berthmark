@@ -130,14 +130,13 @@ async def test_get_risk_history_success_and_schema(history_test_db):
             assert isinstance(item["compositeScore"], (int, float))
 
             sub = item["subRisks"]
+            assert "terminalDelays" not in sub
             assert "congestion" in sub
-            assert "terminalDelays" in sub
             assert "weather" in sub
             assert "navigational" in sub
 
             m = item["metrics"]
             assert "congestion" in m
-            assert "terminal" in m
             assert "weather" in m
             assert "navigational" in m
 

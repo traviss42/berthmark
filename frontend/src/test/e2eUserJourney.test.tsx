@@ -96,7 +96,6 @@ describe('Frontend End-to-End User Journey (Issue 24)', () => {
         compositeScore: 90.0,
         subRisks: {
           congestion: { category: 'congestion', tier: 'medium', score: 60.0, detail: 'High anchored count', factors: [] },
-          terminalDelays: { category: 'terminalDelays', tier: 'low', score: 25.0, detail: 'Normal', factors: [] },
           weather: { category: 'weather', tier: 'high', score: 90.0, detail: 'Heavy swell 2.8m', factors: [] },
           navigational: { category: 'navigational', tier: 'high', score: 90.0, detail: 'UKC depth violation', factors: [] },
         },
@@ -157,7 +156,6 @@ describe('Frontend End-to-End User Journey (Issue 24)', () => {
         compositeScore: 25.0,
         subRisks: {
           congestion: { category: 'congestion', tier: 'low', score: 25.0, detail: 'Normal', factors: [] },
-          terminalDelays: { category: 'terminalDelays', tier: 'low', score: 25.0, detail: 'Normal', factors: [] },
           weather: { category: 'weather', tier: 'low', score: 25.0, detail: 'Calm', factors: [] },
           navigational: { category: 'navigational', tier: 'low', score: 25.0, detail: 'Safe UKC', factors: [] },
         },
@@ -205,7 +203,6 @@ describe('Frontend End-to-End User Journey (Issue 24)', () => {
         compositeScore: 60.0,
         subRisks: {
           congestion: { category: 'congestion', tier: 'medium', score: 60.0, detail: 'Moderate traffic', factors: [] },
-          terminalDelays: { category: 'terminalDelays', tier: 'low', score: 25.0, detail: 'Normal', factors: [] },
           weather: { category: 'weather', tier: 'low', score: 25.0, detail: 'Normal', factors: [] },
           navigational: { category: 'navigational', tier: 'low', score: 25.0, detail: 'Normal', factors: [] },
         },
@@ -271,7 +268,6 @@ describe('Frontend End-to-End User Journey (Issue 24)', () => {
           compositeScore: 25.0,
           subRisks: {
             congestion: { category: 'congestion', tier: 'low', score: 25.0, detail: '', factors: [] },
-            terminalDelays: { category: 'terminalDelays', tier: 'low', score: 25.0, detail: '', factors: [] },
             weather: { category: 'weather', tier: 'low', score: 25.0, detail: '', factors: [] },
             navigational: { category: 'navigational', tier: 'low', score: 25.0, detail: '', factors: [] },
           },

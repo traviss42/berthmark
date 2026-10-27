@@ -17,7 +17,6 @@ describe('Risk Engine - Composite Tier (Weakest-Link Rule)', () => {
   it('returns high when any sub-risk is high', () => {
     const subRisks = {
       congestion: makeSubRisk('low'),
-      terminalDelays: makeSubRisk('low'),
       weather: makeSubRisk('high'),
       navigational: makeSubRisk('low'),
     };
@@ -25,10 +24,9 @@ describe('Risk Engine - Composite Tier (Weakest-Link Rule)', () => {
     expect(result.tier).toBe('high');
   });
 
-  it('returns high even if only one of four is high', () => {
+  it('returns high even if only one of three is high', () => {
     const subRisks = {
       congestion: makeSubRisk('low'),
-      terminalDelays: makeSubRisk('low'),
       weather: makeSubRisk('low'),
       navigational: makeSubRisk('high'),
     };
@@ -38,8 +36,7 @@ describe('Risk Engine - Composite Tier (Weakest-Link Rule)', () => {
   it('returns medium when highest sub-risk is medium', () => {
     const subRisks = {
       congestion: makeSubRisk('low'),
-      terminalDelays: makeSubRisk('medium'),
-      weather: makeSubRisk('low'),
+      weather: makeSubRisk('medium'),
       navigational: makeSubRisk('low'),
     };
     expect(computeCompositeTier(subRisks).tier).toBe('medium');
@@ -48,7 +45,6 @@ describe('Risk Engine - Composite Tier (Weakest-Link Rule)', () => {
   it('returns low when all sub-risks are low', () => {
     const subRisks = {
       congestion: makeSubRisk('low'),
-      terminalDelays: makeSubRisk('low'),
       weather: makeSubRisk('low'),
       navigational: makeSubRisk('low'),
     };
@@ -58,7 +54,6 @@ describe('Risk Engine - Composite Tier (Weakest-Link Rule)', () => {
   it('prioritizes high over medium', () => {
     const subRisks = {
       congestion: makeSubRisk('medium'),
-      terminalDelays: makeSubRisk('medium'),
       weather: makeSubRisk('high'),
       navigational: makeSubRisk('low'),
     };
@@ -76,7 +71,6 @@ describe('Risk Engine - assessRisk', () => {
     expect(assessment.vesselClass).toBe('panamax');
     expect(assessment.compositeTier).toMatch(/^(low|medium|high)$/);
     expect(assessment.subRisks.congestion).toBeDefined();
-    expect(assessment.subRisks.terminalDelays).toBeDefined();
     expect(assessment.subRisks.weather).toBeDefined();
     expect(assessment.subRisks.navigational).toBeDefined();
   });

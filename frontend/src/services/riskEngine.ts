@@ -68,33 +68,6 @@ function assessCongestion(metrics: PortMetrics): SubRiskResult {
   return { category: 'congestion', tier, score: tierToScore(tier), detail, factors };
 }
 
-// ── Terminal Delays: berth turnaround, wait ratios, dwell anomalies ──
-function assessTerminalDelays(metrics: PortMetrics): SubRiskResult {
-  const t = metrics.terminal;
-  const factors: string[] = [];
-
-  const turnaroundRatio = t.rolling30dAvgTurnaround > 0
-    ? t.berthTurnaroundHours / t.rolling30dAvgTurnaround
-    : 1;
-
-  let tier: RiskTier = 'low';
-  let detail = 'Terminal operations within normal turnaround range.';
-
-  if (turnaroundRatio >= 1.5 || t.berthToAnchorageWaitRatio >= 0.7 || t.dwellTimeAnomalyScore >= 70) {
-    tier = 'high';
-    detail = 'Significant terminal delays: turnaround or dwell anomalies detected.';
-  } else if (turnaroundRatio >= 1.2 || t.berthToAnchorageWaitRatio >= 0.5 || t.dwellTimeAnomalyScore >= 40) {
-    tier = 'medium';
-    detail = 'Terminal delays above baseline trends.';
-  }
-
-  if (turnaroundRatio >= 1.2) factors.push(`Turnaround ${t.berthTurnaroundHours}h vs ${t.rolling30dAvgTurnaround}h avg (ratio ${turnaroundRatio.toFixed(2)})`);
-  if (t.berthToAnchorageWaitRatio >= 0.5) factors.push(`Berth-to-anchorage wait ratio ${t.berthToAnchorageWaitRatio}`);
-  if (t.dwellTimeAnomalyScore >= 40) factors.push(`Dwell anomaly score ${t.dwellTimeAnomalyScore}/100`);
-
-  return { category: 'terminalDelays', tier, score: tierToScore(tier), detail, factors };
-}
-
 // ── Weather: PIANC-based hard limits, adjusted per vessel class ──
 function assessWeather(metrics: PortMetrics, vesselClass: VesselClass): SubRiskResult {
   const w = metrics.weather;
@@ -186,7 +159,6 @@ export function assessRisk(
 
   const subRisks: Record<SubRiskCategory, SubRiskResult> = {
     congestion: assessCongestion(metrics),
-    terminalDelays: assessTerminalDelays(metrics),
     weather: assessWeather(metrics, vesselClass),
     navigational: assessNavigational(metrics, vesselClass),
   };

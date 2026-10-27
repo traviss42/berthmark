@@ -1,11 +1,10 @@
-import { Anchor, Clock, CloudRain, Compass } from 'lucide-react';
+import { Anchor, CloudRain, Compass } from 'lucide-react';
 import type { SubRiskCategory, SubRiskResult } from '@/types';
 import { RiskBadge } from './RiskBadge';
 import { CATEGORY_LABELS } from '@/utils/riskDisplay';
 
 const ICONS: Record<SubRiskCategory, typeof Anchor> = {
   congestion: Anchor,
-  terminalDelays: Clock,
   weather: CloudRain,
   navigational: Compass,
 };

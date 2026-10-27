@@ -69,7 +69,6 @@ def test_weakest_link_escalation_rules():
     # 1. Congestion HIGH, others LOW -> HIGH
     sr_cong_high = SubRisksDict(
         congestion=make_subrisk("congestion", "high", 90.0),
-        terminalDelays=make_subrisk("terminalDelays", "low", 25.0),
         weather=make_subrisk("weather", "low", 25.0),
         navigational=make_subrisk("navigational", "low", 25.0),
     )
@@ -80,7 +79,6 @@ def test_weakest_link_escalation_rules():
     # 2. Weather HIGH, others LOW -> HIGH
     sr_wx_high = SubRisksDict(
         congestion=make_subrisk("congestion", "low", 25.0),
-        terminalDelays=make_subrisk("terminalDelays", "low", 25.0),
         weather=make_subrisk("weather", "high", 90.0),
         navigational=make_subrisk("navigational", "low", 25.0),
     )
@@ -91,7 +89,6 @@ def test_weakest_link_escalation_rules():
     # 3. Navigational HIGH, others LOW -> HIGH
     sr_nav_high = SubRisksDict(
         congestion=make_subrisk("congestion", "low", 25.0),
-        terminalDelays=make_subrisk("terminalDelays", "low", 25.0),
         weather=make_subrisk("weather", "low", 25.0),
         navigational=make_subrisk("navigational", "high", 95.0),
     )
@@ -99,43 +96,29 @@ def test_weakest_link_escalation_rules():
     assert tier == "high"
     assert score == 95.0
 
-    # 4. Terminal HIGH, others LOW -> HIGH
-    sr_term_high = SubRisksDict(
-        congestion=make_subrisk("congestion", "low", 25.0),
-        terminalDelays=make_subrisk("terminalDelays", "high", 88.0),
-        weather=make_subrisk("weather", "low", 25.0),
-        navigational=make_subrisk("navigational", "low", 25.0),
-    )
-    tier, score = determine_composite_tier(sr_term_high)
-    assert tier == "high"
-    assert score == 88.0
-
-    # 5. All LOW -> LOW
+    # 4. All LOW -> LOW
     sr_all_low = SubRisksDict(
         congestion=make_subrisk("congestion", "low", 20.0),
-        terminalDelays=make_subrisk("terminalDelays", "low", 25.0),
         weather=make_subrisk("weather", "low", 15.0),
         navigational=make_subrisk("navigational", "low", 22.0),
     )
     tier, score = determine_composite_tier(sr_all_low)
     assert tier == "low"
-    assert score == 25.0
+    assert score == 22.0
 
-    # 6. One MEDIUM with others LOW -> MEDIUM
+    # 5. One MEDIUM with others LOW -> MEDIUM
     sr_one_med = SubRisksDict(
         congestion=make_subrisk("congestion", "low", 25.0),
-        terminalDelays=make_subrisk("terminalDelays", "medium", 60.0),
-        weather=make_subrisk("weather", "low", 25.0),
+        weather=make_subrisk("weather", "medium", 60.0),
         navigational=make_subrisk("navigational", "low", 25.0),
     )
     tier, score = determine_composite_tier(sr_one_med)
     assert tier == "medium"
     assert score == 60.0
 
-    # 7. Multiple HIGH hazards -> HIGH, max score preserved
+    # 6. Multiple HIGH hazards -> HIGH, max score preserved
     sr_multi_high = SubRisksDict(
         congestion=make_subrisk("congestion", "high", 85.0),
-        terminalDelays=make_subrisk("terminalDelays", "medium", 60.0),
         weather=make_subrisk("weather", "high", 92.5),
         navigational=make_subrisk("navigational", "low", 25.0),
     )
@@ -156,7 +139,6 @@ def test_vessel_labels_and_assessment_assembly():
 
     sub_risks = SubRisksDict(
         congestion=make_subrisk("congestion", "medium", 60.0),
-        terminalDelays=make_subrisk("terminalDelays", "low", 25.0),
         weather=make_subrisk("weather", "low", 25.0),
         navigational=make_subrisk("navigational", "low", 25.0),
     )
@@ -288,7 +270,6 @@ async def test_atomic_persistence_and_alert_transition(test_db_session: AsyncSes
 
     sub_risks_low = SubRisksDict(
         congestion=make_subrisk("congestion", "low", 25.0),
-        terminalDelays=make_subrisk("terminalDelays", "low", 25.0),
         weather=make_subrisk("weather", "low", 25.0),
         navigational=make_subrisk("navigational", "low", 25.0),
     )
@@ -356,7 +337,6 @@ async def test_atomic_persistence_and_alert_transition(test_db_session: AsyncSes
     # 3. Transition to HIGH creates alert log with previous=LOW, new=HIGH
     sub_risks_high = SubRisksDict(
         congestion=make_subrisk("congestion", "high", 90.0),
-        terminalDelays=make_subrisk("terminalDelays", "low", 25.0),
         weather=make_subrisk("weather", "low", 25.0),
         navigational=make_subrisk("navigational", "low", 25.0),
     )
@@ -392,7 +372,6 @@ async def test_atomic_rollback_on_persistence_error(test_db_session: AsyncSessio
 
     sub_risks = SubRisksDict(
         congestion=make_subrisk("congestion", "high", 90.0),
-        terminalDelays=make_subrisk("terminalDelays", "low", 25.0),
         weather=make_subrisk("weather", "low", 25.0),
         navigational=make_subrisk("navigational", "low", 25.0),
     )

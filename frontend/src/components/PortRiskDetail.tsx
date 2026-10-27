@@ -1,4 +1,4 @@
-import { ArrowLeft, MapPin, Trash2, RefreshCw, Wind, Waves, Eye, Compass, Anchor, Clock } from 'lucide-react';
+import { ArrowLeft, MapPin, Trash2, RefreshCw, Wind, Waves, Eye, Compass, Anchor } from 'lucide-react';
 import type { RiskAssessment } from '@/types';
 import { RiskBadge } from './RiskBadge';
 import { SubRiskBreakdown } from './SubRiskBreakdown';
@@ -96,7 +96,7 @@ export function PortRiskDetail({ assessment, onBack, onRemove, canRemove, onRefr
       {/* Raw Metrics */}
       <div>
         <h3 className="text-sm font-semibold text-slate-700 mb-3">Live Metrics</h3>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* Congestion Metrics */}
           <div className="rounded-lg border border-slate-200 p-4 bg-white">
             <h4 className="text-sm font-medium text-slate-700 mb-3 flex items-center gap-2">
@@ -114,19 +114,6 @@ export function PortRiskDetail({ assessment, onBack, onRemove, canRemove, onRefr
                     : 'N/A — Collecting Baseline'
                 }
               />
-            </div>
-          </div>
-
-          {/* Terminal Metrics */}
-          <div className="rounded-lg border border-slate-200 p-4 bg-white">
-            <h4 className="text-sm font-medium text-slate-700 mb-3 flex items-center gap-2">
-              <Clock className="w-4 h-4 text-slate-500" /> Terminal
-            </h4>
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <Metric label="Berth Turnaround" value={`${m.terminal.berthTurnaroundHours}h`} />
-              <Metric label="Wait Ratio" value={m.terminal.berthToAnchorageWaitRatio.toFixed(2)} />
-              <Metric label="Dwell Anomaly" value={`${m.terminal.dwellTimeAnomalyScore}/100`} />
-              <Metric label="30d Avg Turnaround" value={`${m.terminal.rolling30dAvgTurnaround}h`} />
             </div>
           </div>
 

@@ -53,16 +53,16 @@ class NavigationalMetrics(BaseModel):
 
 
 class PortMetrics(BaseModel):
-    """Unified 4-dimensional operational metrics for a port."""
+    """Unified operational metrics for a port."""
 
     model_config = ConfigDict(populate_by_name=True)
 
     portId: str = Field(..., min_length=1, description="Unique port identifier.")
     timestamp: datetime = Field(..., description="Timestamp of observation in UTC.")
     congestion: CongestionMetrics
-    terminal: TerminalMetrics
     weather: WeatherMetrics
     navigational: NavigationalMetrics
+    terminal: TerminalMetrics | None = Field(default=None, description="Optional terminal metrics.")
 
     @field_validator("portId")
     @classmethod
@@ -83,7 +83,7 @@ class SubRiskResult(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    category: Literal["congestion", "terminalDelays", "weather", "navigational"]
+    category: Literal["congestion", "weather", "navigational"]
     tier: Literal["low", "medium", "high"]
     score: float = Field(..., ge=0.0, le=100.0, description="Normalized risk score (Low ~25, Medium ~60, High ~90).")
     detail: str = Field(..., min_length=1, description="Analytical explanation of risk tier.")
