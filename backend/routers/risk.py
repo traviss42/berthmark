@@ -1,6 +1,7 @@
 """FastAPI router for Risk Assessment endpoints."""
 
 import logging
+import uuid
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
@@ -8,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.auth.schemas import ErrorResponse
 from backend.database import get_db_session
-from backend.models import Port
+from backend.models import Port, UserWatchlist
 from backend.ports.service import BENCHMARK_PORTS_METADATA
 from backend.schemas.risk import BulkRiskAssessmentRequest, RiskAssessment
 from backend.services.risk_engine import (
@@ -76,6 +77,24 @@ async def resolve_port_entity(session: AsyncSession, port_id: str) -> tuple[Port
         session.add(port)
         await session.flush()
         return port, canonical_id, canonical_name or port.port_name
+
+    # Check if format is user-watchlist specific ID: port-user-<watchlist_uuid>
+    if clean_id.lower().startswith("port-user-"):
+        try:
+            w_uuid = uuid.UUID(clean_id[10:])
+            uw_res = await session.execute(
+                select(UserWatchlist).where(UserWatchlist.watchlist_id == w_uuid)
+            )
+            uw = uw_res.scalar_one_or_none()
+            if uw:
+                port_res = await session.execute(
+                    select(Port).where(func.upper(Port.unlocode) == uw.unlocode.upper())
+                )
+                port = port_res.scalar_one_or_none()
+                if port:
+                    return port, clean_id, port.port_name
+        except ValueError:
+            pass
 
     # 2. Check general ports table by UN/LOCODE or port-<locode>
     candidate_locode = clean_id[5:].upper() if clean_id.lower().startswith("port-") else clean_id.upper()

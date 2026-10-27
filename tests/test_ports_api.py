@@ -252,3 +252,78 @@ async def test_get_port_by_id(ports_test_db):
         assert res_special.json()["statusCode"] == 404
 
     app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_get_port_by_id_user_watchlist():
+    """Verify GET /api/v1/ports/{portId} resolves custom watchlist ID port-user-<uuid>."""
+    import uuid
+    from backend.models import User, UserWatchlist
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+
+    test_user_id = uuid.uuid4()
+    watchlist_id = uuid.uuid4()
+
+    async with session_factory() as session:
+        from backend.taxonomy.seed import seed_vessel_classes
+        await seed_vessel_classes(session)
+
+        port = Port(
+            unlocode="CAVAN",
+            port_name="Vancouver",
+            country_code="CA",
+            subdivision_code="CA-BC",
+            latitude=49.3,
+            longitude=-123.1,
+            channel_depth_m=10.7,
+            is_depth_available=True,
+            reconciliation_method="EXACT_UNLOCODE",
+        )
+        session.add(port)
+        user = User(
+            id=test_user_id,
+            email="vancouver_operator@test.com",
+            hashed_password="pw",
+            name="Vancouver Operator",
+        )
+        session.add(user)
+        uw = UserWatchlist(
+            watchlist_id=watchlist_id,
+            user_id=test_user_id,
+            unlocode="CAVAN",
+            vessel_class_id="panamax",
+        )
+        session.add(uw)
+        await session.commit()
+
+    async def override_get_db():
+        async with session_factory() as session:
+            yield session
+
+    app.dependency_overrides[get_db_session] = override_get_db
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        res = await client.get(f"/api/v1/ports/port-user-{watchlist_id}")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["id"] == f"port-user-{watchlist_id}"
+        assert data["name"] == "Vancouver"
+        assert data["locode"] == "CAVAN"
+        assert data["country"] == "Canada"
+        assert data["vesselClass"] == "panamax"
+
+        # Search Canadian ports
+        res_van = await client.get("/api/v1/ports/search?q=Vancouver")
+        assert res_van.status_code == 200
+        assert len(res_van.json()) == 1
+        assert res_van.json()[0]["locode"] == "CAVAN"
+
+    app.dependency_overrides.clear()
+    await engine.dispose()

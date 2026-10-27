@@ -1,21 +1,41 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, MapPin, Plus, X } from 'lucide-react';
-import type { Port } from '@/types';
+import { Search, MapPin, Plus, X, Ship } from 'lucide-react';
+import type { Port, VesselClass } from '@/types';
 import { getServices } from '@/services';
+import { VESSEL_TAXONOMY } from '@/data/vesselTaxonomy';
+
+export interface SubscriptionRef {
+  locode: string;
+  vesselClass?: string;
+}
 
 interface Props {
   onAddPort: (port: Omit<Port, 'id' | 'isDefault' | 'addedByUserId'>) => Promise<unknown>;
-  existingLocodes: string[];
+  existingLocodes?: string[];
+  existingSubscriptions?: SubscriptionRef[];
+  defaultVesselClass?: VesselClass;
 }
 
-export function PortSearch({ onAddPort, existingLocodes }: Props) {
+export function PortSearch({
+  onAddPort,
+  existingLocodes = [],
+  existingSubscriptions,
+  defaultVesselClass = 'neoPanamax',
+}: Props) {
   const [query, setQuery] = useState('');
+  const [selectedVesselClass, setSelectedVesselClass] = useState<VesselClass>(defaultVesselClass);
   const [results, setResults] = useState<Port[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const services = getServices();
+
+  useEffect(() => {
+    if (defaultVesselClass) {
+      setSelectedVesselClass(defaultVesselClass);
+    }
+  }, [defaultVesselClass]);
 
   useEffect(() => {
     if (query.trim().length < 2) {
@@ -45,6 +65,17 @@ export function PortSearch({ onAddPort, existingLocodes }: Props) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const isPortAlreadyAdded = (locode: string): boolean => {
+    if (existingSubscriptions && existingSubscriptions.length > 0) {
+      return existingSubscriptions.some(
+        (sub) =>
+          sub.locode.toUpperCase() === locode.toUpperCase() &&
+          (sub.vesselClass || 'neoPanamax').toLowerCase() === selectedVesselClass.toLowerCase()
+      );
+    }
+    return existingLocodes.includes(locode);
+  };
+
   async function handleAdd(port: Port) {
     setAdding(true);
     try {
@@ -55,6 +86,7 @@ export function PortSearch({ onAddPort, existingLocodes }: Props) {
         lat: port.lat,
         lon: port.lon,
         geofenceRadiusNm: port.geofenceRadiusNm,
+        vesselClass: selectedVesselClass,
       });
       setQuery('');
       setResults([]);
@@ -88,12 +120,32 @@ export function PortSearch({ onAddPort, existingLocodes }: Props) {
       </div>
 
       {open && (loading || results.length > 0) && (
-        <div className="absolute z-20 mt-2 w-full rounded-lg border border-slate-200 bg-white shadow-lg max-h-72 overflow-y-auto">
+        <div className="absolute z-20 mt-2 w-full rounded-lg border border-slate-200 bg-white shadow-lg max-h-80 overflow-y-auto">
+          {/* Vessel class assignment header */}
+          <div className="sticky top-0 z-10 px-3.5 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-2 flex-wrap text-xs">
+            <span className="font-semibold text-slate-700 flex items-center gap-1.5">
+              <Ship className="w-3.5 h-3.5 text-blue-600" />
+              <span>Target Class:</span>
+            </span>
+            <select
+              data-testid="search-vessel-class-select"
+              value={selectedVesselClass}
+              onChange={(e) => setSelectedVesselClass(e.target.value as VesselClass)}
+              className="px-2 py-1 bg-white border border-slate-300 rounded text-xs font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer shadow-2xs"
+            >
+              {VESSEL_TAXONOMY.map((opt) => (
+                <option key={opt.id} value={opt.id}>
+                  {opt.label} ({opt.criteria})
+                </option>
+              ))}
+            </select>
+          </div>
+
           {loading && (
             <div className="px-4 py-3 text-sm text-slate-400">Searching...</div>
           )}
           {!loading && results.map((port) => {
-            const alreadyAdded = existingLocodes.includes(port.locode);
+            const alreadyAdded = isPortAlreadyAdded(port.locode);
             return (
               <div
                 key={port.id}

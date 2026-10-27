@@ -381,3 +381,61 @@ async def test_bulk_risk_o1_query_complexity_and_sub_500ms_performance(bulk_test
 
     event.remove(engine.sync_engine, "before_cursor_execute", before_cursor_execute)
     app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_bulk_risk_user_watchlist_id_resolution(bulk_test_db):
+    """Verify bulk risk evaluation correctly resolves user watchlist IDs (port-user-<uuid>)."""
+    import uuid
+    from backend.models import User, UserWatchlist
+
+    engine, session_factory = bulk_test_db
+
+    async def override_get_db():
+        async with session_factory() as session:
+            yield session
+
+    app.dependency_overrides[get_db_session] = override_get_db
+
+    test_user_id = uuid.uuid4()
+    watchlist_id = uuid.uuid4()
+
+    async with session_factory() as session:
+        user = User(
+            id=test_user_id,
+            email="watchlist_operator@test.com",
+            hashed_password="fakehashedpassword",
+            name="Watchlist Operator",
+        )
+        session.add(user)
+        uw = UserWatchlist(
+            watchlist_id=watchlist_id,
+            user_id=test_user_id,
+            unlocode="NLRTM",
+            vessel_class_id="neoPanamax",
+        )
+        session.add(uw)
+        await session.commit()
+
+    payload = {
+        "ports": [
+            {"id": f"port-user-{watchlist_id}", "name": "Custom Rotterdam Watchlist Entry"},
+        ],
+        "vesselClass": "neoPanamax",
+    }
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        res = await client.post("/api/v1/risk/assessments/bulk", json=payload)
+        assert res.status_code == 200
+        data = res.json()
+        assert len(data) == 1
+        assessment = data[0]
+        assert assessment["portId"] == f"port-user-{watchlist_id}"
+        assert assessment["portName"] == "Custom Rotterdam Watchlist Entry"
+        assert assessment["vesselClass"] == "neoPanamax"
+        assert "compositeScore" in assessment
+        assert "subRisks" in assessment
+
+    app.dependency_overrides.clear()

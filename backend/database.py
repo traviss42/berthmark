@@ -230,11 +230,14 @@ async def auto_init_database(engine: AsyncEngine | None = None) -> bool:
         result = await session.execute(text("SELECT COUNT(*) FROM ports"))
         ports_count = result.scalar() or 0
 
-        if ports_count > 0:
+        if ports_count >= 2800:
             logger.info("Database already seeded (ports count = %d). Skipping seeding.", ports_count)
             return False
 
-        logger.info("Fresh database detected (ports count = 0). Executing automated bulk seeding...")
+        logger.info(
+            "Database requires bulk port seeding (current ports count = %d). Executing automated bulk seeding...",
+            ports_count,
+        )
 
         # 3. Load app/data/ports_seed.json (run ETL script if file is missing)
         seed_path = get_seed_data_path()
@@ -249,10 +252,14 @@ async def auto_init_database(engine: AsyncEngine | None = None) -> bool:
         with open(seed_path, "r", encoding="utf-8") as f:
             ports_data = json.load(f)
 
+        existing_res = await session.execute(select(Port.unlocode))
+        existing_locodes = {loc.upper() for loc in existing_res.scalars().all()}
+        ports_to_insert = [p for p in ports_data if p["unlocode"].upper() not in existing_locodes]
+
         # Bulk insert ports into ports table in batches for high-speed insertion
         batch_size = 500
-        for i in range(0, len(ports_data), batch_size):
-            batch = ports_data[i : i + batch_size]
+        for i in range(0, len(ports_to_insert), batch_size):
+            batch = ports_to_insert[i : i + batch_size]
             await session.execute(insert(Port), batch)
 
         # 4. Bulk-insert the 7 benchmark vessel classes into vessel_classes
@@ -265,9 +272,9 @@ async def auto_init_database(engine: AsyncEngine | None = None) -> bool:
 
         await session.commit()
         logger.info(
-            "Bulk seeding successfully finished: %d ports, %d vessel classes inserted.",
-            len(ports_data),
-            len(BENCHMARK_7_VESSEL_CLASSES),
+            "Bulk seeding successfully finished: %d new ports, %d total ports now available.",
+            len(ports_to_insert),
+            ports_count + len(ports_to_insert),
         )
         return True
 

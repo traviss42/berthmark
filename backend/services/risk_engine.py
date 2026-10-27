@@ -477,6 +477,26 @@ async def calculate_bulk_risk(
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=timezone.utc)
 
+    # 0. Batch-resolve any user watchlist item IDs: port-user-<watchlist_uuid>
+    user_watchlist_ids: list[uuid.UUID] = []
+    user_id_map: dict[str, uuid.UUID] = {}
+    for item in items:
+        cid = item.id.strip()
+        if cid.lower().startswith("port-user-"):
+            try:
+                w_uuid = uuid.UUID(cid[10:])
+                user_watchlist_ids.append(w_uuid)
+                user_id_map[cid] = w_uuid
+            except ValueError:
+                pass
+
+    user_watchlist_locodes: dict[uuid.UUID, str] = {}
+    if user_watchlist_ids:
+        uw_stmt = select(UserWatchlist).where(UserWatchlist.watchlist_id.in_(user_watchlist_ids))
+        uw_res = await session.execute(uw_stmt)
+        for uw in uw_res.scalars().all():
+            user_watchlist_locodes[uw.watchlist_id] = uw.unlocode.upper()
+
     # 1. Deduplicate requested ports by resolved LOCODE / port ID
     unique_items: list[BulkRiskPortItem] = []
     seen_keys: set[str] = set()
@@ -486,18 +506,23 @@ async def calculate_bulk_risk(
     for item in items:
         clean_id = item.id.strip()
         locode_match = None
-        for locode, meta in BENCHMARK_PORTS_METADATA.items():
-            if meta["id"].lower() == clean_id.lower() or locode.lower() == clean_id.lower():
-                locode_match = locode.upper()
-                break
-        if not locode_match:
-            locode_match = clean_id[5:].upper() if clean_id.lower().startswith("port-") else clean_id.upper()
+        if clean_id in user_id_map and user_id_map[clean_id] in user_watchlist_locodes:
+            locode_match = user_watchlist_locodes[user_id_map[clean_id]]
+        else:
+            for locode, meta in BENCHMARK_PORTS_METADATA.items():
+                if meta["id"].lower() == clean_id.lower() or locode.lower() == clean_id.lower():
+                    locode_match = locode.upper()
+                    break
+            if not locode_match:
+                locode_match = clean_id[5:].upper() if clean_id.lower().startswith("port-") else clean_id.upper()
 
-        if locode_match not in seen_keys:
-            seen_keys.add(locode_match)
+        dedup_key = clean_id if clean_id.lower().startswith("port-user-") else locode_match
+        if dedup_key not in seen_keys:
+            seen_keys.add(dedup_key)
             unique_items.append(item)
             candidate_locodes[clean_id] = locode_match
-            target_locodes_set.add(locode_match)
+            if locode_match:
+                target_locodes_set.add(locode_match)
 
     # 3. Query all candidate ports in ONE batched query
     ports_stmt = select(Port).where(func.upper(Port.unlocode).in_([l.upper() for l in target_locodes_set]))
@@ -536,8 +561,8 @@ async def calculate_bulk_risk(
     # Match items to resolved Port entities
     resolved_pairs: list[tuple[BulkRiskPortItem, Port]] = []
     for item in unique_items:
-        locode = candidate_locodes[item.id.strip()]
-        if locode in ports_by_locode:
+        locode = candidate_locodes.get(item.id.strip())
+        if locode and locode in ports_by_locode:
             resolved_pairs.append((item, ports_by_locode[locode]))
 
     if not resolved_pairs:

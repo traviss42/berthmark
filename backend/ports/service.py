@@ -15,6 +15,7 @@ COUNTRY_NAMES: dict[str, str] = {
     "NL": "Netherlands",
     "SG": "Singapore",
     "US": "United States",
+    "CA": "Canada",
     "BE": "Belgium",
     "CN": "China",
     "DE": "Germany",
@@ -228,6 +229,31 @@ async def get_port_by_id(session: AsyncSession, port_id: str) -> PortResponse | 
             geofenceRadiusNm=meta["geofenceRadiusNm"],
             addedByUserId=None,
         )
+
+    # Check if format is user-watchlist specific ID: port-user-<watchlist_uuid>
+    if clean_id.lower().startswith("port-user-"):
+        try:
+            w_uuid = uuid.UUID(clean_id[10:])
+            uw_res = await session.execute(
+                select(UserWatchlist).options(selectinload(UserWatchlist.port)).where(UserWatchlist.watchlist_id == w_uuid)
+            )
+            uw = uw_res.scalar_one_or_none()
+            if uw and uw.port:
+                country = COUNTRY_NAMES.get(uw.port.country_code.upper(), uw.port.country_code)
+                return PortResponse(
+                    id=clean_id,
+                    name=uw.port.port_name,
+                    locode=uw.port.unlocode.upper(),
+                    country=country,
+                    lat=round(float(uw.port.latitude), 6),
+                    lon=round(float(uw.port.longitude), 6),
+                    isDefault=False,
+                    geofenceRadiusNm=float(uw.geofence_radius_nm) if uw.geofence_radius_nm is not None else 8.0,
+                    addedByUserId=str(uw.user_id),
+                    vesselClass=uw.vessel_class_id,
+                )
+        except ValueError:
+            pass
 
     # If format is port-<locode>
     if clean_id.lower().startswith("port-"):

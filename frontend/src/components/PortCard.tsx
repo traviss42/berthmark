@@ -302,7 +302,14 @@ export const PortCard: React.FC<PortCardProps> = ({
       </div>
 
       {/* ── Direct Footer / Link ── */}
-      <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-blue-600 group-hover:text-blue-700 font-medium">
+      <div
+        data-testid="view-telemetry-link"
+        onClick={(e) => {
+          e.stopPropagation();
+          onSelect && onSelect(port.id);
+        }}
+        className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-blue-600 group-hover:text-blue-700 font-medium cursor-pointer"
+      >
         <span>View Operational Telemetry</span>
         <ChevronRight className="w-4 h-4 transform group-hover:translate-x-1 transition-transform" />
       </div>

@@ -3,6 +3,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { PortCard } from '@/components/PortCard';
 import { PortList } from '@/components/PortList';
+import { PortSearch } from '@/components/PortSearch';
+import { setServices } from '@/services';
 import type { Port, RiskAssessment } from '@/types';
 
 const mockPortRotterdam: Port = {
@@ -325,5 +327,83 @@ describe('PortList Component and Grid Grouping', () => {
 
     expect(screen.getByTestId('port-card-sub-1')).toBeInTheDocument();
     expect(screen.getByTestId('port-card-sub-2')).toBeInTheDocument();
+  });
+});
+
+describe('PortSearch Component with Multi-Class Support', () => {
+  it('allows adding a port under a new vessel class even if already added under another class', async () => {
+    const mockSearchPorts = vi.fn().mockResolvedValue([mockPortRotterdam]);
+    setServices({
+      ports: {
+        getPorts: vi.fn(),
+        getDefaultPorts: vi.fn(),
+        searchPorts: mockSearchPorts,
+        addPort: vi.fn(),
+        removePort: vi.fn(),
+      },
+      risk: {} as any,
+      notifications: {} as any,
+    });
+
+    const onAddPort = vi.fn().mockResolvedValue({});
+
+    // Rotterdam is already added under 'vlcc'
+    const existingSubscriptions = [{ locode: 'NLRTM', vesselClass: 'vlcc' }];
+
+    render(
+      <PortSearch
+        onAddPort={onAddPort}
+        existingSubscriptions={existingSubscriptions}
+        defaultVesselClass="handysize"
+      />
+    );
+
+    const input = screen.getByPlaceholderText(/search ports/i);
+    fireEvent.change(input, { target: { value: 'Rotterdam' } });
+
+    // Wait for debounce and search results
+    const addBtn = await screen.findByRole('button', { name: /^add$/i });
+    expect(addBtn).toBeEnabled();
+
+    // Submit addition under handysize
+    fireEvent.click(addBtn);
+    expect(onAddPort).toHaveBeenCalledWith(
+      expect.objectContaining({
+        locode: 'NLRTM',
+        vesselClass: 'handysize',
+      })
+    );
+  });
+
+  it('disables add button when port is already subscribed under the selected vessel class', async () => {
+    const mockSearchPorts = vi.fn().mockResolvedValue([mockPortRotterdam]);
+    setServices({
+      ports: {
+        getPorts: vi.fn(),
+        getDefaultPorts: vi.fn(),
+        searchPorts: mockSearchPorts,
+        addPort: vi.fn(),
+        removePort: vi.fn(),
+      },
+      risk: {} as any,
+      notifications: {} as any,
+    });
+
+    const existingSubscriptions = [{ locode: 'NLRTM', vesselClass: 'vlcc' }];
+
+    render(
+      <PortSearch
+        onAddPort={vi.fn()}
+        existingSubscriptions={existingSubscriptions}
+        defaultVesselClass="vlcc"
+      />
+    );
+
+    const input = screen.getByPlaceholderText(/search ports/i);
+    fireEvent.change(input, { target: { value: 'Rotterdam' } });
+
+    // With 'vlcc' selected, the button displays 'Added' and is disabled
+    const addedBtn = await screen.findByRole('button', { name: /^added$/i });
+    expect(addedBtn).toBeDisabled();
   });
 });

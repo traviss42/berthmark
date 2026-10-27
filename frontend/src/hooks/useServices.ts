@@ -66,11 +66,23 @@ export function useRiskAssessments(
     setLoading(true);
     setError(null);
     try {
-      const data = await services.risk.getBulkRiskAssessments(
-        ports.map((p) => ({ id: p.id, name: p.name })),
-        vesselClass
-      );
-      setAssessments(data);
+      // Group ports by their assigned vesselClass (or fallback to active vesselClass parameter)
+      const byClass = new Map<VesselClass, Port[]>();
+      for (const p of ports) {
+        const vc = (p.vesselClass || vesselClass || 'neoPanamax') as VesselClass;
+        if (!byClass.has(vc)) byClass.set(vc, []);
+        byClass.get(vc)!.push(p);
+      }
+
+      const results: RiskAssessment[] = [];
+      for (const [vc, classPorts] of byClass.entries()) {
+        const data = await services.risk.getBulkRiskAssessments(
+          classPorts.map((p) => ({ id: p.id, name: p.name })),
+          vc
+        );
+        results.push(...(data || []));
+      }
+      setAssessments(results);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load risk data');
     } finally {

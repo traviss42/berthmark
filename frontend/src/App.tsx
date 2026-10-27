@@ -247,6 +247,10 @@ function Dashboard({ onNavigate }: DashboardProps) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [showNotifications]);
 
+  const existingSubscriptions = useMemo(
+    () => ports.map((p) => ({ locode: p.locode, vesselClass: p.vesselClass })),
+    [ports]
+  );
   const existingLocodes = useMemo(() => ports.map((p) => p.locode), [ports]);
 
   return (
@@ -383,6 +387,8 @@ function Dashboard({ onNavigate }: DashboardProps) {
                 <PortSearch
                   onAddPort={addPort}
                   existingLocodes={existingLocodes}
+                  existingSubscriptions={existingSubscriptions}
+                  defaultVesselClass={vesselClass}
                 />
               </div>
               <div className="flex items-center gap-2 flex-wrap">
