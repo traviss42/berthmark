@@ -11,7 +11,7 @@ Berthmark dynamically evaluates port safety constraints against international en
 - **Multi-Class Port Subscriptions**: Monitor ports under specific vessel classes (*VLCC, Suezmax, Aframax, Neo-Panamax, Panamax, Handymax/Supramax, etc.*) or subscribe to the same port under multiple classes to compare draft margins side by side.
 - **Global Port Directory**: Reconciled dataset of **2,890+ commercial ports** integrating UN/LOCODE keys and NGA World Port Index (Pub 150) controlling channel depths.
 - **Physics-Grounded Grounding Risk**: PIANC Report 121 Under-Keel Clearance formulas evaluating channel depths against dynamic vessel draft and wave swell.
-- **Automated Alternative Port Diversions**: Automatic Haversine geodesic proximity ranking and depth gating for safe candidate diversion ports when primary ports reach High risk.
+- **Automated Alternative Port Recommendations**: Dynamically gates candidate ports by physical channel depth ($\text{WPI channel depth} \ge h_{\text{req}}$), regional subdivision proximity, and Haversine geodesic distance to deliver diversion suggestions directly inside high-risk cards and map popups.
 - **Direct UI Philosophy**: High-density card grid and interactive SVG map popups displaying 4D traffic counts, weather, UKC margins, and telemetry directly without slide-out drawers.
 - **Self-Service Authentication**: User registration and JWT-based session security with isolated watchlists.
 
