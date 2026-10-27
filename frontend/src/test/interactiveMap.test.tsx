@@ -383,7 +383,7 @@ describe('InteractiveMap Component', () => {
     const zoomInBtn = screen.getByRole('button', { name: /Zoom In/i });
     fireEvent.click(zoomInBtn);
     const zoomedTransform = mapGroup?.getAttribute('transform');
-    expect(zoomedTransform).toContain('scale(1.3)');
+    expect(zoomedTransform).toContain('scale(1.5)');
 
     // Change vessel class to vlcc
     rerender(
@@ -396,6 +396,72 @@ describe('InteractiveMap Component', () => {
 
     // Transform remains exactly the same! No jumping or resizing to the top-left!
     expect(mapGroup?.getAttribute('transform')).toBe(zoomedTransform);
+  });
+
+  it('allows extended zoom up to 24x and displays the zoom level badge', () => {
+    render(
+      <InteractiveMap
+        ports={[mockPort1]}
+        assessments={new Map()}
+        vesselClass="neoPanamax"
+      />
+    );
+
+    const zoomInBtn = screen.getByRole('button', { name: /Zoom In/i });
+    const zoomLevelBadge = screen.getByTestId('map-zoom-level');
+    expect(zoomLevelBadge).toHaveTextContent('1.0x');
+
+    // Click zoom in 10 times to reach high zoom
+    for (let i = 0; i < 10; i++) {
+      fireEvent.click(zoomInBtn);
+    }
+
+    // Should reach 24x max zoom
+    expect(zoomLevelBadge).toHaveTextContent('24.0x');
+    const mapGroup = screen.getByTestId('interactive-map-container').querySelector('svg > g');
+    expect(mapGroup?.getAttribute('transform')).toContain('scale(24)');
+  });
+
+  it('clicking a port pin automatically zooms into the region to differentiate nearby ports', () => {
+    render(
+      <InteractiveMap
+        ports={[mockPort1, mockPort2, mockPort3]}
+        assessments={assessmentsMap}
+        vesselClass="neoPanamax"
+      />
+    );
+
+    const mapGroup = screen.getByTestId('interactive-map-container').querySelector('svg > g');
+    expect(mapGroup?.getAttribute('transform')).toBe('translate(0, 0) scale(1)');
+
+    // Click Houston pin from initial global zoom 1
+    const houstonPin = screen.getByTestId('map-pin-port-houston');
+    fireEvent.click(houstonPin);
+
+    // Camera zooms in to at least 6x to clearly differentiate Corpus Christi (150 NM)
+    expect(mapGroup?.getAttribute('transform')).toContain('scale(6)');
+    expect(screen.getByTestId('map-zoom-level')).toHaveTextContent('6.0x');
+  });
+
+  it('clicking "Zoom into Port & Alternatives" button in popup focuses camera to 8x', () => {
+    render(
+      <InteractiveMap
+        ports={[mockPort1, mockPort2, mockPort3]}
+        assessments={assessmentsMap}
+        vesselClass="neoPanamax"
+      />
+    );
+
+    const houstonPin = screen.getByTestId('map-pin-port-houston');
+    fireEvent.click(houstonPin);
+
+    const focusBtn = screen.getByTestId('popup-focus-port');
+    expect(focusBtn).toBeInTheDocument();
+    fireEvent.click(focusBtn);
+
+    const mapGroup = screen.getByTestId('interactive-map-container').querySelector('svg > g');
+    expect(mapGroup?.getAttribute('transform')).toContain('scale(8)');
+    expect(screen.getByTestId('map-zoom-level')).toHaveTextContent('8.0x');
   });
 
   it('renders alternative safe haven pins and diversion route vectors on map for high-risk ports', () => {

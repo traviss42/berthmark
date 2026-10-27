@@ -16,6 +16,7 @@ import {
   Minus as MinusIcon,
   AlertTriangle,
   Check,
+  Crosshair,
 } from 'lucide-react';
 import type { Port, RiskAssessment, VesselClass, AlternativePortRecommendation } from '@/types';
 import {
@@ -37,9 +38,11 @@ export interface InteractiveMapProps {
   className?: string;
 }
 
-// SVG Map dimensions
+// SVG Map dimensions and zoom bounds
 const MAP_WIDTH = 1000;
 const MAP_HEIGHT = 500;
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 24;
 
 function projectCoordinates(lat: number, lon: number): { x: number; y: number } {
   // Equirectangular projection
@@ -108,16 +111,70 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Zoom controls with viewport bounding
-  const handleZoomIn = () => setZoom((z) => Math.min(z * 1.3, 4));
+  // Center and zoom map to specified coordinates with viewport boundary clamping
+  const zoomToCoords = useCallback((lat: number, lon: number, targetZoom = 8) => {
+    const { x, y } = projectCoordinates(lat, lon);
+    const newZoom = Math.min(Math.max(targetZoom, MIN_ZOOM), MAX_ZOOM);
+    const rawPanX = MAP_WIDTH / 2 - x * newZoom;
+    const rawPanY = MAP_HEIGHT / 2 - y * newZoom;
+
+    const minPanX = MAP_WIDTH * (1 - newZoom);
+    const minPanY = MAP_HEIGHT * (1 - newZoom);
+
+    setZoom(newZoom);
+    setPan({
+      x: Math.min(0, Math.max(minPanX, rawPanX)),
+      y: Math.min(0, Math.max(minPanY, rawPanY)),
+    });
+  }, []);
+
+  // Zoom controls with viewport bounding and extended range
+  const handleZoomIn = () => setZoom((z) => Math.min(Number((z * 1.5).toFixed(2)), MAX_ZOOM));
   const handleZoomOut = () =>
     setZoom((z) => {
-      const next = Math.max(z / 1.3, 1);
+      const next = Math.max(Number((z / 1.5).toFixed(2)), MIN_ZOOM);
       if (next === 1) {
         setPan({ x: 0, y: 0 });
       }
       return next;
     });
+
+  // Wheel zoom centered on mouse cursor position
+  const handleWheel = (e: React.WheelEvent) => {
+    if ((e.target as HTMLElement).closest('[data-testid="map-popup"], [data-testid="map-alt-popup"]')) {
+      return;
+    }
+    e.preventDefault();
+    const rect = mapContainerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    const cursorX = ((e.clientX - rect.left) / rect.width) * MAP_WIDTH;
+    const cursorY = ((e.clientY - rect.top) / rect.height) * MAP_HEIGHT;
+
+    const zoomFactor = e.deltaY < 0 ? 1.25 : 0.8;
+    const nextZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Number((zoom * zoomFactor).toFixed(2))));
+
+    if (nextZoom === zoom) return;
+
+    if (nextZoom === MIN_ZOOM) {
+      setZoom(MIN_ZOOM);
+      setPan({ x: 0, y: 0 });
+      return;
+    }
+
+    const scaleRatio = nextZoom / zoom;
+    const rawPanX = cursorX - (cursorX - pan.x) * scaleRatio;
+    const rawPanY = cursorY - (cursorY - pan.y) * scaleRatio;
+
+    const minPanX = MAP_WIDTH * (1 - nextZoom);
+    const minPanY = MAP_HEIGHT * (1 - nextZoom);
+
+    setZoom(nextZoom);
+    setPan({
+      x: Math.min(0, Math.max(minPanX, rawPanX)),
+      y: Math.min(0, Math.max(minPanY, rawPanY)),
+    });
+  };
 
   // Pan handlers with strict boundary clamping to keep Earth fully inside viewport
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -239,12 +296,16 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     };
   }, [selectedPort, visiblePorts, assessments]);
 
+  // Inverse zoom factor to keep pins and badges a constant, crisp size on screen
+  const invZoom = 1 / zoom;
+
   return (
     <div
       ref={mapContainerRef}
       role="region"
       aria-label="Interactive Port Risk Map"
       data-testid="interactive-map-container"
+      onWheel={handleWheel}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
@@ -288,7 +349,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           className="transition-transform duration-75 ease-out"
         >
           {/* Latitude & Longitude Graticule lines */}
-          <g stroke="#1e293b" strokeWidth="0.75" strokeDasharray="3 3">
+          <g stroke="#1e293b" strokeWidth={0.75 * invZoom} strokeDasharray={`${3 * invZoom} ${3 * invZoom}`}>
             {/* Latitudes */}
             <line x1="0" y1="125" x2={MAP_WIDTH} y2="125" />
             <line x1="0" y1="250" x2={MAP_WIDTH} y2="250" />
@@ -304,7 +365,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             d={WORLD_MAP_PATH}
             fill="#1e293b"
             stroke="#334155"
-            strokeWidth="0.6"
+            strokeWidth={Math.max(0.15, 0.6 * invZoom)}
             className="transition-colors"
           />
 
@@ -326,15 +387,15 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                     x2={route.endX}
                     y2={route.endY}
                     stroke="#06b6d4"
-                    strokeWidth="2"
-                    strokeDasharray="4 3"
+                    strokeWidth={2 * invZoom}
+                    strokeDasharray={`${4 * invZoom} ${3 * invZoom}`}
                     markerEnd="url(#diversion-arrow)"
                     opacity="0.85"
                   />
                   {/* Midpoint Distance Badge */}
                   <g
                     data-testid={`map-diversion-badge-${route.alternative.portId}`}
-                    transform={`translate(${midX}, ${midY})`}
+                    transform={`translate(${midX}, ${midY}) scale(${invZoom})`}
                   >
                     <rect
                       x="-22"
@@ -378,6 +439,13 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                     alternative: pin.alternative,
                     primaryPort: pin.primaryPort,
                   });
+                  if (zoom < 6) {
+                    zoomToCoords(
+                      typeof pin.alternative.lat === 'number' ? pin.alternative.lat : pin.primaryPort.lat,
+                      typeof pin.alternative.lon === 'number' ? pin.alternative.lon : pin.primaryPort.lon,
+                      6
+                    );
+                  }
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
@@ -386,10 +454,17 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                       alternative: pin.alternative,
                       primaryPort: pin.primaryPort,
                     });
+                    if (zoom < 6) {
+                      zoomToCoords(
+                        typeof pin.alternative.lat === 'number' ? pin.alternative.lat : pin.primaryPort.lat,
+                        typeof pin.alternative.lon === 'number' ? pin.alternative.lon : pin.primaryPort.lon,
+                        6
+                      );
+                    }
                   }
                 }}
                 className="cursor-pointer focus:outline-none group"
-                transform={`translate(${pin.x}, ${pin.y})`}
+                transform={`translate(${pin.x}, ${pin.y}) scale(${invZoom})`}
               >
                 <title>{`Safe Haven: ${pin.alternative.portName} (${pin.alternative.unlocode}) - +${pin.alternative.depthMarginM.toFixed(1)}m margin`}</title>
 
@@ -461,16 +536,22 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                     setSelectedPortId(port.id);
                     setSelectedAlternative(null);
                     if (onSelectPort) onSelectPort(port.id);
+                    if (zoom < 6) {
+                      zoomToCoords(port.lat, port.lon, 6);
+                    }
                   }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
                       setSelectedPortId(port.id);
                       setSelectedAlternative(null);
+                      if (zoom < 6) {
+                        zoomToCoords(port.lat, port.lon, 6);
+                      }
                     }
                   }}
                   className="cursor-pointer focus:outline-none group"
-                  transform={`translate(${x}, ${y})`}
+                  transform={`translate(${x}, ${y}) scale(${invZoom})`}
                 >
                   {/* Micro tooltip / title */}
                   <title>{`${port.name} (${port.locode})`}</title>
@@ -542,7 +623,13 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
       )}
 
       {/* ── Map Zoom & Recenter Controls ── */}
-      <div className="absolute bottom-5 right-5 flex flex-col gap-1.5 z-10">
+      <div className="absolute bottom-5 right-5 flex flex-col items-center gap-1.5 z-10">
+        <div
+          data-testid="map-zoom-level"
+          className="px-2 py-0.5 text-[10px] font-mono font-bold text-center bg-slate-800/90 text-slate-300 rounded-md border border-slate-700 shadow-md backdrop-blur-xs select-none"
+        >
+          {zoom.toFixed(1)}x
+        </div>
         <button
           onClick={handleZoomIn}
           aria-label="Zoom In"
@@ -559,6 +646,17 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
         >
           <Minus className="w-4 h-4" />
         </button>
+        {selectedPort && (
+          <button
+            onClick={() => zoomToCoords(selectedPort.lat, selectedPort.lon, Math.max(zoom, 8))}
+            aria-label="Focus Port"
+            title="Focus on Selected Port & Alternatives"
+            data-testid="map-focus-btn"
+            className="w-9 h-9 flex items-center justify-center bg-blue-600 hover:bg-blue-500 text-white rounded-lg border border-blue-500 shadow-md backdrop-blur-xs transition-colors cursor-pointer"
+          >
+            <Crosshair className="w-4 h-4" />
+          </button>
+        )}
         <button
           onClick={recenter}
           aria-label="Reset View"
@@ -629,8 +727,19 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             </button>
           </div>
 
+          {/* 1-Click Zoom into Port & Alternatives Focus Button */}
+          <button
+            type="button"
+            data-testid="popup-focus-port"
+            onClick={() => zoomToCoords(selectedPort.lat, selectedPort.lon, Math.max(zoom, 8))}
+            className="w-full mt-2.5 flex items-center justify-center gap-1.5 py-1.5 px-3 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+          >
+            <Crosshair className="w-3.5 h-3.5 text-blue-600" />
+            <span>Zoom into Port &amp; Alternatives</span>
+          </button>
+
           {/* Risk Badge & Vessel Class */}
-          <div className="flex items-center justify-between gap-2 my-3">
+          <div className="flex items-center justify-between gap-2 my-2.5">
             {selectedAssessment ? (
               <div
                 data-testid="popup-risk-badge"
@@ -829,6 +938,9 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                       alternative: candidate,
                       primaryPort: selectedPort,
                     });
+                    if (typeof candidate.lat === 'number' && typeof candidate.lon === 'number') {
+                      zoomToCoords(candidate.lat, candidate.lon, Math.max(zoom, 8));
+                    }
                   } else if (onSelectPort) {
                     onSelectPort(altId);
                   }
@@ -892,6 +1004,26 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {/* 1-Click Zoom into Safe Haven Focus Button */}
+          {typeof selectedAlternative.alternative.lat === 'number' &&
+            typeof selectedAlternative.alternative.lon === 'number' && (
+              <button
+                type="button"
+                data-testid="alt-popup-focus"
+                onClick={() =>
+                  zoomToCoords(
+                    selectedAlternative.alternative.lat!,
+                    selectedAlternative.alternative.lon!,
+                    Math.max(zoom, 8)
+                  )
+                }
+                className="w-full mt-2.5 flex items-center justify-center gap-1.5 py-1.5 px-3 bg-cyan-50 hover:bg-cyan-100 text-cyan-800 border border-cyan-200 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+              >
+                <Crosshair className="w-3.5 h-3.5 text-cyan-600" />
+                <span>Zoom into Safe Haven</span>
+              </button>
+            )}
 
           {/* Clearance & Proximity Stats */}
           <div className="my-3 space-y-2">
