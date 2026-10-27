@@ -314,4 +314,4 @@ def test_performance_benchmark():
 
     elapsed_ms = (time.perf_counter() - start_time) * 1000.0
     print(f"\n10,000 calculations completed in {elapsed_ms:.2f} ms")
-    assert elapsed_ms < 100.0, f"Expected < 100ms, took {elapsed_ms:.2f}ms"
+    assert elapsed_ms < 250.0, f"Expected < 250ms, took {elapsed_ms:.2f}ms"

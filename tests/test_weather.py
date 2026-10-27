@@ -416,3 +416,50 @@ async def test_database_persistence_error_resilience():
         metrics = await client.get_weather(51.9244, 4.4777, unlocode="NLRTM")
         assert metrics is not None
         assert isinstance(metrics, WeatherMetrics)
+
+
+@pytest.mark.asyncio
+async def test_get_tide_offset_success():
+    """Verify live tide offset parses sea_level_height_msl correctly."""
+    def mock_tide_handler(request: httpx.Request) -> httpx.Response:
+        assert "sea_level_height_msl" in str(request.url)
+        return httpx.Response(
+            200,
+            json={
+                "latitude": 33.74,
+                "longitude": -118.27,
+                "current": {"time": "2026-10-27T02:00", "sea_level_height_msl": 0.85},
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock_tide_handler)) as http_client:
+        client = WeatherClient(http_client=http_client)
+        res = await client.get_tide_offset(33.74, -118.27)
+        assert res.tide_offset_m == 0.85
+        assert res.tide_data_available is True
+        assert res.source == "open-meteo-marine"
+
+
+@pytest.mark.asyncio
+async def test_get_tide_offset_caching():
+    """Verify in-memory TTL caching prevents redundant HTTP calls for tide offset."""
+    call_count = 0
+
+    def mock_tide_handler(request: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        return httpx.Response(
+            200,
+            json={
+                "current": {"sea_level_height_msl": 0.42},
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock_tide_handler)) as http_client:
+        client = WeatherClient(http_client=http_client, ttl_seconds=60.0)
+        res1 = await client.get_tide_offset(51.92, 4.48)
+        res2 = await client.get_tide_offset(51.92, 4.48)
+        assert res1.tide_offset_m == 0.42
+        assert res2.tide_offset_m == 0.42
+        assert call_count == 1
+

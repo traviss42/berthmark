@@ -299,7 +299,7 @@ class WeatherClient:
             params = {
                 "latitude": lat,
                 "longitude": lon,
-                "current": "sea_level_height_above_mean_sea_level",
+                "current": "sea_level_height_msl",
             }
             if client is not None:
                 res = await client.get(self.marine_api_url, params=params)
@@ -312,7 +312,7 @@ class WeatherClient:
             if res.is_success:
                 data = res.json()
                 current_block = data.get("current") or {}
-                sea_level = current_block.get("sea_level_height_above_mean_sea_level")
+                sea_level = current_block.get("sea_level_height_msl")
                 if sea_level is not None:
                     offset = round(float(sea_level), 2)
                     return TideResult(
