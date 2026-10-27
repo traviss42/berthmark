@@ -361,6 +361,40 @@ describe('InteractiveMap Component', () => {
     expect(screen.getByTestId('no-vessel-ports-alert')).toBeInTheDocument();
     expect(screen.getByText('(0 of 1 ports)')).toBeInTheDocument();
   });
+
+  it('changing vessel class filter does not resize or recenter the map view', () => {
+    const portPanamax: Port = { ...mockPort1, id: 'port-panamax', vesselClass: 'panamax' };
+    const portVlcc: Port = { ...mockPort2, id: 'port-vlcc', vesselClass: 'vlcc' };
+
+    const { rerender } = render(
+      <InteractiveMap
+        ports={[portPanamax, portVlcc]}
+        assessments={new Map()}
+        vesselClass="panamax"
+      />
+    );
+
+    const mapGroup = screen.getByTestId('interactive-map-container').querySelector('svg > g');
+    expect(mapGroup?.getAttribute('transform')).toBe('translate(0, 0) scale(1)');
+
+    // Zoom in
+    const zoomInBtn = screen.getByRole('button', { name: /Zoom In/i });
+    fireEvent.click(zoomInBtn);
+    const zoomedTransform = mapGroup?.getAttribute('transform');
+    expect(zoomedTransform).toContain('scale(1.3)');
+
+    // Change vessel class to vlcc
+    rerender(
+      <InteractiveMap
+        ports={[portPanamax, portVlcc]}
+        assessments={new Map()}
+        vesselClass="vlcc"
+      />
+    );
+
+    // Transform remains exactly the same! No jumping or resizing to the top-left!
+    expect(mapGroup?.getAttribute('transform')).toBe(zoomedTransform);
+  });
 });
 
 describe('Dashboard Grid vs Map View Toggle in App', () => {

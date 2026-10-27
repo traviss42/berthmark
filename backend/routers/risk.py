@@ -189,6 +189,7 @@ async def bulk_risk_assessment(
             session=session,
             items=request.ports,
             vessel_class=request.vesselClass,
+            include_alternatives=True,
         )
     except ValueError as exc:
         raise HTTPException(

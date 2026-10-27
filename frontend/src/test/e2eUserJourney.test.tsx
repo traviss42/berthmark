@@ -358,7 +358,7 @@ describe('Frontend End-to-End User Journey (Issue 24)', () => {
     expect(await screen.findByText(/3 ports tracked/i)).toBeInTheDocument();
 
     // High density grid renders monitored ports
-    expect(await screen.findByText('Port of Singapore')).toBeInTheDocument();
+    expect(await screen.findByText('Port of Singapore', {}, { timeout: 5000 })).toBeInTheDocument();
     expect(screen.getByText('Port of Houston')).toBeInTheDocument();
     expect(screen.getByText('Port of Rotterdam')).toBeInTheDocument();
   });

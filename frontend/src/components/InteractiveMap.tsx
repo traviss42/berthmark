@@ -79,49 +79,12 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     });
   }, [ports, assessments, vesselClass]);
 
-  // Auto-center bounds when visible ports change
+  // Recenter / Reset map view to show full global Earth
   const recenter = useCallback(() => {
-    const targetPorts = visiblePorts.length > 0 ? visiblePorts : ports;
-    if (targetPorts.length === 0) {
-      setZoom(1);
-      setPan({ x: 0, y: 0 });
-      return;
-    }
-
-    let minX = MAP_WIDTH;
-    let maxX = 0;
-    let minY = MAP_HEIGHT;
-    let maxY = 0;
-
-    targetPorts.forEach((p) => {
-      const { x, y } = projectCoordinates(p.lat, p.lon);
-      if (x < minX) minX = x;
-      if (x > maxX) maxX = x;
-      if (y < minY) minY = y;
-      if (y > maxY) maxY = y;
-    });
-
-    const midX = (minX + maxX) / 2;
-    const midY = (minY + maxY) / 2;
-
-    const spanX = Math.max(maxX - minX, 150);
-    const spanY = Math.max(maxY - minY, 100);
-
-    const fitZoom = Math.min(
-      Math.max(1, Math.min(MAP_WIDTH / spanX, MAP_HEIGHT / spanY) * 0.7),
-      3
-    );
-
-    setZoom(fitZoom);
-    setPan({
-      x: (MAP_WIDTH / 2 - midX) * fitZoom,
-      y: (MAP_HEIGHT / 2 - midY) * fitZoom,
-    });
-  }, [visiblePorts, ports]);
-
-  useEffect(() => {
-    recenter();
-  }, [recenter]);
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+    setSelectedPortId(null);
+  }, []);
 
   // Handle Escape key to close popup
   useEffect(() => {
@@ -134,11 +97,18 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Zoom controls
-  const handleZoomIn = () => setZoom((z) => Math.min(z * 1.3, 5));
-  const handleZoomOut = () => setZoom((z) => Math.max(z / 1.3, 0.8));
+  // Zoom controls with viewport bounding
+  const handleZoomIn = () => setZoom((z) => Math.min(z * 1.3, 4));
+  const handleZoomOut = () =>
+    setZoom((z) => {
+      const next = Math.max(z / 1.3, 1);
+      if (next === 1) {
+        setPan({ x: 0, y: 0 });
+      }
+      return next;
+    });
 
-  // Pan handlers
+  // Pan handlers with strict boundary clamping to keep Earth fully inside viewport
   const handleMouseDown = (e: React.MouseEvent) => {
     // Only pan if clicking map backdrop, not interactive pins/popups
     if ((e.target as HTMLElement).closest('[data-testid^="map-pin-"], [data-testid="map-popup"]')) {
@@ -150,9 +120,16 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!isPanning) return;
+    const rawX = e.clientX - startPan.x;
+    const rawY = e.clientY - startPan.y;
+
+    // Strict clamping so Earth is never thrown out of the viewport
+    const minPanX = Math.min(0, MAP_WIDTH * (1 - zoom));
+    const minPanY = Math.min(0, MAP_HEIGHT * (1 - zoom));
+
     setPan({
-      x: e.clientX - startPan.x,
-      y: e.clientY - startPan.y,
+      x: Math.min(0, Math.max(minPanX, rawX)),
+      y: Math.min(0, Math.max(minPanY, rawY)),
     });
   };
 

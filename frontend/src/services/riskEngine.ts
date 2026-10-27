@@ -5,6 +5,7 @@ import type {
   SubRiskResult,
   VesselClass,
   RiskAssessment,
+  AlternativePortRecommendation,
 } from '@/types';
 import { VESSEL_CLASS_THRESHOLDS, getVesselClassInfo } from '@/data/vesselTaxonomy';
 
@@ -149,6 +150,141 @@ export function computeCompositeTier(
   return { tier: 'low', score: 25 };
 }
 
+const MOCK_ALTERNATIVES_BY_PORT: Record<string, AlternativePortRecommendation[]> = {
+  'port-rotterdam': [
+    {
+      portId: 'port-wilhelmshaven',
+      unlocode: 'DEWVN',
+      portName: 'Port of Wilhelmshaven',
+      country: 'Germany',
+      distanceNm: 140.0,
+      channelDepthM: 20.0,
+      depthMarginM: 3.3,
+      swellHeightM: 1.0,
+      riskTier: 'low',
+      trafficStatus: '3 anchored / 2 underway',
+    },
+    {
+      portId: 'port-europoort',
+      unlocode: 'NLEUR',
+      portName: 'Europoort',
+      country: 'Netherlands',
+      distanceNm: 13.5,
+      channelDepthM: 20.1,
+      depthMarginM: 3.4,
+      swellHeightM: 0.9,
+      riskTier: 'low',
+      trafficStatus: '5 anchored / 4 underway',
+    },
+  ],
+  'port-singapore': [
+    {
+      portId: 'port-tanjungbalai',
+      unlocode: 'IDTJB',
+      portName: 'Tanjungbalai',
+      country: 'Indonesia',
+      distanceNm: 29.2,
+      channelDepthM: 21.6,
+      depthMarginM: 4.9,
+      swellHeightM: 0.8,
+      riskTier: 'low',
+      trafficStatus: '2 anchored / 1 underway',
+    },
+    {
+      portId: 'port-sungai-udang',
+      unlocode: 'MYSUP',
+      portName: 'Sungai Udang Port',
+      country: 'Malaysia',
+      distanceNm: 118.3,
+      channelDepthM: 17.1,
+      depthMarginM: 0.4,
+      swellHeightM: 0.9,
+      riskTier: 'low',
+      trafficStatus: '1 anchored / 1 underway',
+    },
+  ],
+  'port-houston': [
+    {
+      portId: 'port-corpus-christi',
+      unlocode: 'USCRP',
+      portName: 'Port of Corpus Christi',
+      country: 'United States',
+      distanceNm: 150.0,
+      channelDepthM: 16.5,
+      depthMarginM: 1.3,
+      swellHeightM: 1.0,
+      riskTier: 'low',
+      trafficStatus: '4 anchored / 2 underway',
+    },
+    {
+      portId: 'port-loop-terminal',
+      unlocode: 'USLO9',
+      portName: 'Loop Terminal',
+      country: 'United States',
+      distanceNm: 280.4,
+      channelDepthM: 23.2,
+      depthMarginM: 6.5,
+      swellHeightM: 1.2,
+      riskTier: 'low',
+      trafficStatus: '3 anchored / 1 underway',
+    },
+  ],
+  'port-losangeles': [
+    {
+      portId: 'port-longbeach',
+      unlocode: 'USLGB',
+      portName: 'Port of Long Beach',
+      country: 'United States',
+      distanceNm: 17.3,
+      channelDepthM: 23.2,
+      depthMarginM: 6.5,
+      swellHeightM: 0.9,
+      riskTier: 'low',
+      trafficStatus: '4 anchored / 3 underway',
+    },
+  ],
+  'port-antwerp': [
+    {
+      portId: 'port-europoort',
+      unlocode: 'NLEUR',
+      portName: 'Europoort',
+      country: 'Netherlands',
+      distanceNm: 45.1,
+      channelDepthM: 20.1,
+      depthMarginM: 3.4,
+      swellHeightM: 0.9,
+      riskTier: 'low',
+      trafficStatus: '4 anchored / 2 underway',
+    },
+    {
+      portId: 'port-dunkerque',
+      unlocode: 'FRDKK',
+      portName: 'Dunkerque',
+      country: 'France',
+      distanceNm: 76.8,
+      channelDepthM: 20.1,
+      depthMarginM: 3.4,
+      swellHeightM: 1.1,
+      riskTier: 'low',
+      trafficStatus: '3 anchored / 1 underway',
+    },
+  ],
+  'port-shanghai': [
+    {
+      portId: 'port-zhoushan',
+      unlocode: 'CNZOS',
+      portName: 'Zhoushan',
+      country: 'China',
+      distanceNm: 80.7,
+      channelDepthM: 21.6,
+      depthMarginM: 4.9,
+      swellHeightM: 1.0,
+      riskTier: 'low',
+      trafficStatus: '5 anchored / 3 underway',
+    },
+  ],
+};
+
 export function assessRisk(
   portId: string,
   portName: string,
@@ -165,6 +301,28 @@ export function assessRisk(
 
   const composite = computeCompositeTier(subRisks);
 
+  const alternatives: AlternativePortRecommendation[] = [];
+  if (composite.tier === 'high') {
+    const cleanId = portId.toLowerCase().trim();
+    const matched = MOCK_ALTERNATIVES_BY_PORT[cleanId];
+    if (matched) {
+      alternatives.push(...matched);
+    } else {
+      alternatives.push({
+        portId: `port-alt-${cleanId}`,
+        unlocode: `${cleanId.slice(0, 3).toUpperCase()}AL`,
+        portName: `Regional Safe Harbor (${portName || 'Alternative'})`,
+        country: 'Regional Waters',
+        distanceNm: 45.0,
+        channelDepthM: 18.5,
+        depthMarginM: 2.5,
+        swellHeightM: 0.9,
+        riskTier: 'low',
+        trafficStatus: '2 anchored / 1 underway',
+      });
+    }
+  }
+
   return {
     id: `risk-${portId}-${vesselClass}-${metrics.timestamp}`,
     portId,
@@ -176,5 +334,6 @@ export function assessRisk(
     compositeScore: composite.score,
     subRisks,
     metrics,
+    alternatives,
   };
 }

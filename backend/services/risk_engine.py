@@ -28,7 +28,10 @@ from backend.services.congestion import (
 )
 from backend.services.navigational import calculate_navigational_metrics
 from backend.services.port_metrics import assemble_port_metrics
-from backend.services.recommendation import recommend_alternative_ports
+from backend.services.recommendation import (
+    batch_recommend_alternative_ports,
+    recommend_alternative_ports,
+)
 from backend.services.weather import compute_weather_risk, fetch_tide_offset
 
 logger = logging.getLogger(__name__)
@@ -494,7 +497,7 @@ async def calculate_bulk_risk(
     items: list[BulkRiskPortItem],
     vessel_class: str,
     timestamp: datetime | None = None,
-    include_alternatives: bool = False,
+    include_alternatives: bool = True,
 ) -> list[RiskAssessment]:
     """Concurrent, high-performance bulk risk evaluation with O(1) batched database queries."""
     if vessel_class not in VALID_VESSEL_CLASSES:
@@ -707,20 +710,6 @@ async def calculate_bulk_risk(
             timestamp=ts,
         )
 
-        composite_tier, _ = determine_composite_tier(sub_risks)
-        alternatives: list[AlternativePortRecommendation] = []
-        if include_alternatives and composite_tier in ("high", "critical"):
-            try:
-                alternatives = await recommend_alternative_ports(
-                    session=session,
-                    primary_port=port,
-                    vessel_class=vessel_class,
-                    primary_risk_tier=composite_tier.upper(),
-                    wave_height_m=weather_metrics.waveHeightM,
-                )
-            except Exception as exc:
-                logger.warning("Failed to evaluate alternative ports in bulk for %s: %s", port.unlocode, exc)
-
         return assemble_risk_assessment(
             port_id=canonical_port_id,
             port_name=canonical_port_name,
@@ -728,12 +717,34 @@ async def calculate_bulk_risk(
             sub_risks=sub_risks,
             metrics=unified_metrics,
             timestamp=ts,
-            alternatives=alternatives,
+            alternatives=[],
         )
 
     tasks = [evaluate_item(item, port) for item, port in resolved_pairs]
-    results = await asyncio.gather(*tasks)
-    return list(results)
+    assessments: list[RiskAssessment] = list(await asyncio.gather(*tasks))
+
+    # 6. Batch discover and attach alternative port recommendations in O(1) query complexity
+    if include_alternatives:
+        high_risk_entries = [
+            (port, vessel_class)
+            for (_, port), assess in zip(resolved_pairs, assessments)
+            if assess.compositeTier in ("high", "critical")
+        ]
+        all_ports = [port for _, port in resolved_pairs]
+        try:
+            alt_map = await batch_recommend_alternative_ports(
+                session=session,
+                all_batch_ports=all_ports,
+                high_risk_ports=high_risk_entries,
+                vessel_class=vessel_class,
+            )
+            for (_, port), assess in zip(resolved_pairs, assessments):
+                if assess.compositeTier in ("high", "critical"):
+                    assess.alternatives = alt_map.get(port.unlocode, [])
+        except Exception as exc:
+            logger.warning("Failed to evaluate alternative ports in bulk batch: %s", exc)
+
+    return assessments
 
 
 def snapshot_to_risk_assessment(
