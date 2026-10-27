@@ -163,6 +163,8 @@ const MOCK_ALTERNATIVES_BY_PORT: Record<string, AlternativePortRecommendation[]>
       swellHeightM: 1.0,
       riskTier: 'low',
       trafficStatus: '3 anchored / 2 underway',
+      lat: 53.53,
+      lon: 8.14,
     },
     {
       portId: 'port-europoort',
@@ -175,6 +177,8 @@ const MOCK_ALTERNATIVES_BY_PORT: Record<string, AlternativePortRecommendation[]>
       swellHeightM: 0.9,
       riskTier: 'low',
       trafficStatus: '5 anchored / 4 underway',
+      lat: 51.95,
+      lon: 4.13,
     },
   ],
   'port-singapore': [
@@ -189,6 +193,8 @@ const MOCK_ALTERNATIVES_BY_PORT: Record<string, AlternativePortRecommendation[]>
       swellHeightM: 0.8,
       riskTier: 'low',
       trafficStatus: '2 anchored / 1 underway',
+      lat: 1.0,
+      lon: 103.42,
     },
     {
       portId: 'port-sungai-udang',
@@ -201,6 +207,8 @@ const MOCK_ALTERNATIVES_BY_PORT: Record<string, AlternativePortRecommendation[]>
       swellHeightM: 0.9,
       riskTier: 'low',
       trafficStatus: '1 anchored / 1 underway',
+      lat: 2.26,
+      lon: 102.15,
     },
   ],
   'port-houston': [
@@ -215,6 +223,8 @@ const MOCK_ALTERNATIVES_BY_PORT: Record<string, AlternativePortRecommendation[]>
       swellHeightM: 1.0,
       riskTier: 'low',
       trafficStatus: '4 anchored / 2 underway',
+      lat: 27.8,
+      lon: -97.39,
     },
     {
       portId: 'port-loop-terminal',
@@ -227,6 +237,8 @@ const MOCK_ALTERNATIVES_BY_PORT: Record<string, AlternativePortRecommendation[]>
       swellHeightM: 1.2,
       riskTier: 'low',
       trafficStatus: '3 anchored / 1 underway',
+      lat: 28.88,
+      lon: -90.04,
     },
   ],
   'port-losangeles': [
@@ -241,6 +253,8 @@ const MOCK_ALTERNATIVES_BY_PORT: Record<string, AlternativePortRecommendation[]>
       swellHeightM: 0.9,
       riskTier: 'low',
       trafficStatus: '4 anchored / 3 underway',
+      lat: 33.75,
+      lon: -118.22,
     },
   ],
   'port-antwerp': [
@@ -255,6 +269,8 @@ const MOCK_ALTERNATIVES_BY_PORT: Record<string, AlternativePortRecommendation[]>
       swellHeightM: 0.9,
       riskTier: 'low',
       trafficStatus: '4 anchored / 2 underway',
+      lat: 51.95,
+      lon: 4.13,
     },
     {
       portId: 'port-dunkerque',
@@ -267,6 +283,8 @@ const MOCK_ALTERNATIVES_BY_PORT: Record<string, AlternativePortRecommendation[]>
       swellHeightM: 1.1,
       riskTier: 'low',
       trafficStatus: '3 anchored / 1 underway',
+      lat: 51.05,
+      lon: 2.37,
     },
   ],
   'port-shanghai': [
@@ -281,6 +299,8 @@ const MOCK_ALTERNATIVES_BY_PORT: Record<string, AlternativePortRecommendation[]>
       swellHeightM: 1.0,
       riskTier: 'low',
       trafficStatus: '5 anchored / 3 underway',
+      lat: 29.98,
+      lon: 122.2,
     },
   ],
 };
@@ -319,6 +339,8 @@ export function assessRisk(
         swellHeightM: 0.9,
         riskTier: 'low',
         trafficStatus: '2 anchored / 1 underway',
+        lat: 25.0,
+        lon: 55.0,
       });
     }
   }

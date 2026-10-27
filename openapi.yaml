@@ -1367,6 +1367,16 @@ components:
           type: string
           description: Optional operational traffic status.
           example: 4 anchored / 2 underway
+        lat:
+          type: number
+          format: float
+          description: Geographic latitude of the alternative port.
+          example: 53.53
+        lon:
+          type: number
+          format: float
+          description: Geographic longitude of the alternative port.
+          example: 8.14
 
     BulkRiskAssessmentRequest:
       type: object

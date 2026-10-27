@@ -19,6 +19,8 @@ class AlternativePortRecommendation(BaseModel):
     swellHeightM: float = Field(..., ge=0.0, description="Significant swell wave height in meters.")
     riskTier: Literal["low", "medium"] = Field(..., description="Alternative port operational risk tier.")
     trafficStatus: str = Field(..., description="Summary of anchored and underway vessel traffic.")
+    lat: float | None = Field(default=None, description="Geographic latitude of alternative port.")
+    lon: float | None = Field(default=None, description="Geographic longitude of alternative port.")
 
 
 # Alias for flexible naming convention

@@ -112,6 +112,8 @@ export interface AlternativePortRecommendation {
   swellHeightM: number;
   riskTier: RiskTier;
   trafficStatus?: string;
+  lat?: number;
+  lon?: number;
 }
 
 export interface RiskAssessment {

@@ -124,6 +124,8 @@ const mockAssessmentHoustonHigh: RiskAssessment = {
       depthMarginM: 2.0,
       swellHeightM: 1.0,
       riskTier: 'low',
+      lat: 27.81,
+      lon: -97.40,
     },
   ],
 };
@@ -394,6 +396,100 @@ describe('InteractiveMap Component', () => {
 
     // Transform remains exactly the same! No jumping or resizing to the top-left!
     expect(mapGroup?.getAttribute('transform')).toBe(zoomedTransform);
+  });
+
+  it('renders alternative safe haven pins and diversion route vectors on map for high-risk ports', () => {
+    render(
+      <InteractiveMap
+        ports={[mockPort1, mockPort2, mockPort3]}
+        assessments={assessmentsMap}
+        vesselClass="neoPanamax"
+      />
+    );
+
+    // Corpus Christi is an alternative for Houston (which is high risk)
+    expect(screen.getByTestId('map-alt-pin-port-corpus-christi')).toBeInTheDocument();
+    expect(screen.getByTestId('map-diversion-line-port-corpus-christi')).toBeInTheDocument();
+    expect(screen.getByTestId('map-diversion-badge-port-corpus-christi')).toBeInTheDocument();
+    expect(screen.getByText('150 NM')).toBeInTheDocument();
+  });
+
+  it('clicking an alternative safe haven pin opens on-map detail popup with depth margin and diversion stats', () => {
+    render(
+      <InteractiveMap
+        ports={[mockPort1, mockPort2, mockPort3]}
+        assessments={assessmentsMap}
+        vesselClass="neoPanamax"
+      />
+    );
+
+    const altPin = screen.getByTestId('map-alt-pin-port-corpus-christi');
+    fireEvent.click(altPin);
+
+    // On-map alternative popup displays
+    expect(screen.getByTestId('map-alt-popup')).toBeInTheDocument();
+    expect(screen.getByTestId('alt-popup-title')).toHaveTextContent('Port of Corpus Christi');
+    expect(screen.getByTestId('alt-popup-locode')).toHaveTextContent('USCRP');
+    expect(screen.getByTestId('alt-popup-ukc-margin')).toHaveTextContent('+2.0m');
+    expect(screen.getByTestId('alt-popup-channel-depth')).toHaveTextContent('16.5m');
+    expect(screen.getByTestId('alt-popup-diversion')).toHaveTextContent('150.0 NM diversion');
+  });
+
+  it('1-click + Add to Watchlist button adds the alternative port with its dynamic coordinates', async () => {
+    const handleAddPort = vi.fn().mockResolvedValue({ id: 'port-new' });
+
+    render(
+      <InteractiveMap
+        ports={[mockPort1, mockPort2, mockPort3]}
+        assessments={assessmentsMap}
+        vesselClass="neoPanamax"
+        onAddPort={handleAddPort}
+      />
+    );
+
+    const altPin = screen.getByTestId('map-alt-pin-port-corpus-christi');
+    fireEvent.click(altPin);
+
+    const addBtn = screen.getByTestId('add-alt-to-watchlist');
+    expect(addBtn).toBeInTheDocument();
+    fireEvent.click(addBtn);
+
+    expect(handleAddPort).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'Port of Corpus Christi',
+        locode: 'USCRP',
+        country: 'United States',
+        lat: 27.81,
+        lon: -97.40,
+        vesselClass: 'neoPanamax',
+      })
+    );
+  });
+
+  it('clicking alternative candidate inside port detail popup opens safe haven popup', () => {
+    render(
+      <InteractiveMap
+        ports={[mockPort1, mockPort2, mockPort3]}
+        assessments={assessmentsMap}
+        vesselClass="neoPanamax"
+      />
+    );
+
+    // Open Houston primary port popup
+    const houstonPin = screen.getByTestId('map-pin-port-houston');
+    fireEvent.click(houstonPin);
+
+    // Primary popup opens with AlternativePortDiversion
+    expect(screen.getByTestId('map-popup')).toBeInTheDocument();
+    const altCandidateCard = screen.getByTestId('alternative-candidate-port-corpus-christi');
+    expect(altCandidateCard).toBeInTheDocument();
+
+    // Click candidate card inside popup
+    fireEvent.click(altCandidateCard);
+
+    // Safe haven alternative popup opens
+    expect(screen.getByTestId('map-alt-popup')).toBeInTheDocument();
+    expect(screen.getByTestId('alt-popup-title')).toHaveTextContent('Port of Corpus Christi');
   });
 });
 

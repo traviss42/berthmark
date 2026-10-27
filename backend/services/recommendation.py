@@ -193,6 +193,8 @@ async def recommend_alternative_ports(
             swellHeightM=round(cand_wave, 1),
             riskTier=tier_lower,
             trafficStatus=traffic,
+            lat=cand.latitude,
+            lon=cand.longitude,
         )
         eligible.append(rec)
 
@@ -330,6 +332,8 @@ async def batch_recommend_alternative_ports(
                     swellHeightM=round(cand_wave, 1),
                     riskTier=tier_lower,
                     trafficStatus=traffic,
+                    lat=cand.latitude,
+                    lon=cand.longitude,
                 )
             )
 

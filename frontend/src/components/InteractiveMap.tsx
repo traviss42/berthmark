@@ -15,8 +15,9 @@ import {
   TrendingDown,
   Minus as MinusIcon,
   AlertTriangle,
+  Check,
 } from 'lucide-react';
-import type { Port, RiskAssessment, VesselClass } from '@/types';
+import type { Port, RiskAssessment, VesselClass, AlternativePortRecommendation } from '@/types';
 import {
   formatVesselClass,
   formatQueueVariance,
@@ -32,6 +33,7 @@ export interface InteractiveMapProps {
   vesselClass: VesselClass;
   onSelectPort?: (portId: string) => void;
   onAddFirstPort?: () => void;
+  onAddPort?: (port: Omit<Port, 'id' | 'isDefault' | 'addedByUserId'>) => Promise<any> | void;
   className?: string;
 }
 
@@ -54,9 +56,16 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   vesselClass,
   onSelectPort,
   onAddFirstPort,
+  onAddPort,
   className = '',
 }) => {
   const [selectedPortId, setSelectedPortId] = useState<string | null>(null);
+  const [selectedAlternative, setSelectedAlternative] = useState<{
+    alternative: AlternativePortRecommendation;
+    primaryPort: Port;
+  } | null>(null);
+  const [addedAltLocode, setAddedAltLocode] = useState<string | null>(null);
+  const [addingAlt, setAddingAlt] = useState(false);
   const [zoom, setZoom] = useState<number>(1);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
@@ -84,13 +93,15 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     setZoom(1);
     setPan({ x: 0, y: 0 });
     setSelectedPortId(null);
+    setSelectedAlternative(null);
   }, []);
 
-  // Handle Escape key to close popup
+  // Handle Escape key to close popups
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setSelectedPortId(null);
+        setSelectedAlternative(null);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -111,7 +122,11 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   // Pan handlers with strict boundary clamping to keep Earth fully inside viewport
   const handleMouseDown = (e: React.MouseEvent) => {
     // Only pan if clicking map backdrop, not interactive pins/popups
-    if ((e.target as HTMLElement).closest('[data-testid^="map-pin-"], [data-testid="map-popup"]')) {
+    if (
+      (e.target as HTMLElement).closest(
+        '[data-testid^="map-pin-"], [data-testid^="map-alt-pin-"], [data-testid="map-popup"], [data-testid="map-alt-popup"]'
+      )
+    ) {
       return;
     }
     setIsPanning(true);
@@ -145,6 +160,85 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     [assessments, selectedPortId]
   );
 
+  // Memoize diversion routes and safe haven alternative pins strictly from dynamic API coordinates
+  const { diversionRoutes, alternativePins } = useMemo(() => {
+    interface RouteItem {
+      id: string;
+      primaryPort: Port;
+      alternative: AlternativePortRecommendation;
+      startX: number;
+      startY: number;
+      endX: number;
+      endY: number;
+      distanceNm: number;
+    }
+    interface PinItem {
+      alternative: AlternativePortRecommendation;
+      primaryPort: Port;
+      x: number;
+      y: number;
+    }
+
+    const routes: RouteItem[] = [];
+    const pinsMap = new Map<string, PinItem>();
+
+    // If a port is selected, focus on its alternatives. If no port is selected, show for visible high-risk ports.
+    const targetPorts = selectedPort
+      ? [selectedPort]
+      : visiblePorts.filter((p) => assessments.get(p.id)?.compositeTier === 'high');
+
+    for (const port of targetPorts) {
+      const assessment = assessments.get(port.id);
+      if (!assessment || assessment.compositeTier !== 'high' || !assessment.alternatives) {
+        continue;
+      }
+      const viableAlts = assessment.alternatives
+        .filter((a) => a.riskTier !== 'high')
+        .sort((a, b) => a.distanceNm - b.distanceNm)
+        .slice(0, 3);
+
+      const start = projectCoordinates(port.lat, port.lon);
+
+      for (const alt of viableAlts) {
+        if (
+          typeof alt.lat !== 'number' ||
+          typeof alt.lon !== 'number' ||
+          isNaN(alt.lat) ||
+          isNaN(alt.lon)
+        ) {
+          continue;
+        }
+        const end = projectCoordinates(alt.lat, alt.lon);
+
+        routes.push({
+          id: `${port.id}-${alt.portId}`,
+          primaryPort: port,
+          alternative: alt,
+          startX: start.x,
+          startY: start.y,
+          endX: end.x,
+          endY: end.y,
+          distanceNm: alt.distanceNm,
+        });
+
+        const pinKey = alt.portId || alt.unlocode;
+        if (!pinsMap.has(pinKey)) {
+          pinsMap.set(pinKey, {
+            alternative: alt,
+            primaryPort: port,
+            x: end.x,
+            y: end.y,
+          });
+        }
+      }
+    }
+
+    return {
+      diversionRoutes: routes,
+      alternativePins: Array.from(pinsMap.values()),
+    };
+  }, [selectedPort, visiblePorts, assessments]);
+
   return (
     <div
       ref={mapContainerRef}
@@ -163,13 +257,27 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
       <svg
         viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
         className="w-full h-full"
-        onClick={() => setSelectedPortId(null)}
+        onClick={() => {
+          setSelectedPortId(null);
+          setSelectedAlternative(null);
+        }}
       >
         <defs>
           <radialGradient id="oceanGradient" cx="50%" cy="50%" r="50%">
             <stop offset="0%" stopColor="#0f172a" />
             <stop offset="100%" stopColor="#020617" />
           </radialGradient>
+          <marker
+            id="diversion-arrow"
+            viewBox="0 0 10 10"
+            refX="8"
+            refY="5"
+            markerWidth="5"
+            markerHeight="5"
+            orient="auto-start-reverse"
+          >
+            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#06b6d4" />
+          </marker>
         </defs>
 
         {/* Ocean Background */}
@@ -200,78 +308,210 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             className="transition-colors"
           />
 
-          {/* ── Port Markers ── */}
-          {visiblePorts.map((port) => {
-            const { x, y } = projectCoordinates(port.lat, port.lon);
-            const assessment = assessments.get(port.id);
-            const tier = assessment?.compositeTier ?? 'low';
-            const isSelected = port.id === selectedPortId;
+          {/* ── Diversion Route Vectors ── */}
+          <g data-testid="map-diversion-routes">
+            {diversionRoutes.map((route) => {
+              const midX = (route.startX + route.endX) / 2;
+              const midY = (route.startY + route.endY) / 2;
+              return (
+                <g
+                  key={route.id}
+                  data-testid={`map-diversion-route-${route.alternative.portId}`}
+                  className="pointer-events-none"
+                >
+                  <line
+                    data-testid={`map-diversion-line-${route.alternative.portId}`}
+                    x1={route.startX}
+                    y1={route.startY}
+                    x2={route.endX}
+                    y2={route.endY}
+                    stroke="#06b6d4"
+                    strokeWidth="2"
+                    strokeDasharray="4 3"
+                    markerEnd="url(#diversion-arrow)"
+                    opacity="0.85"
+                  />
+                  {/* Midpoint Distance Badge */}
+                  <g
+                    data-testid={`map-diversion-badge-${route.alternative.portId}`}
+                    transform={`translate(${midX}, ${midY})`}
+                  >
+                    <rect
+                      x="-22"
+                      y="-9"
+                      width="44"
+                      height="14"
+                      rx="4"
+                      fill="#083344"
+                      stroke="#06b6d4"
+                      strokeWidth="1"
+                      opacity="0.9"
+                    />
+                    <text
+                      y="1"
+                      textAnchor="middle"
+                      fill="#67e8f9"
+                      fontSize="7.5"
+                      fontWeight="bold"
+                      className="font-mono"
+                    >
+                      {Math.round(route.distanceNm)} NM
+                    </text>
+                  </g>
+                </g>
+              );
+            })}
+          </g>
 
-            // Pin styling per tier
-            let pinColor = '#10B981'; // green / emerald
-            if (tier === 'medium') pinColor = '#F59E0B'; // amber
-            if (tier === 'high') pinColor = '#EF4444'; // red
-
-            return (
+          {/* ── Recommended Alternative Safe Haven Pins ── */}
+          <g data-testid="map-alternative-pins">
+            {alternativePins.map((pin) => (
               <g
-                key={port.id}
-                data-testid={`map-pin-${port.id}`}
+                key={pin.alternative.portId}
+                data-testid={`map-alt-pin-${pin.alternative.portId}`}
                 tabIndex={0}
                 role="button"
-                aria-label={`${port.name} - ${tier.toUpperCase()} Risk`}
+                aria-label={`Safe Haven Alternative: ${pin.alternative.portName} (${pin.alternative.unlocode})`}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setSelectedPortId(port.id);
-                  if (onSelectPort) onSelectPort(port.id);
+                  setSelectedAlternative({
+                    alternative: pin.alternative,
+                    primaryPort: pin.primaryPort,
+                  });
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
-                    setSelectedPortId(port.id);
+                    setSelectedAlternative({
+                      alternative: pin.alternative,
+                      primaryPort: pin.primaryPort,
+                    });
                   }
                 }}
                 className="cursor-pointer focus:outline-none group"
-                transform={`translate(${x}, ${y})`}
+                transform={`translate(${pin.x}, ${pin.y})`}
               >
-                {/* Micro tooltip / title */}
-                <title>{`${port.name} (${port.locode})`}</title>
+                <title>{`Safe Haven: ${pin.alternative.portName} (${pin.alternative.unlocode}) - +${pin.alternative.depthMarginM.toFixed(1)}m margin`}</title>
 
-                {/* Pulsing selection aura */}
-                {isSelected && (
-                  <circle
-                    r="18"
-                    fill={pinColor}
-                    opacity="0.3"
-                    className="animate-ping"
-                  />
-                )}
-
-                {/* Outer Ring */}
+                {/* Outer pulsing ring */}
                 <circle
-                  r={isSelected ? '12' : '9'}
-                  fill={pinColor}
-                  stroke="#ffffff"
-                  strokeWidth="2"
-                  className="transition-all duration-200 group-hover:scale-125"
+                  r="16"
+                  fill="#06b6d4"
+                  opacity="0.25"
+                  className="animate-ping"
                 />
 
-                {/* Inner Center Dot */}
-                <circle r={isSelected ? '5' : '3.5'} fill="#ffffff" />
+                {/* Diamond Safe Haven Pin */}
+                <polygon
+                  points="0,-10 10,0 0,10 -10,0"
+                  fill="#0891b2"
+                  stroke="#e0f2fe"
+                  strokeWidth="1.75"
+                  className="transition-transform duration-200 group-hover:scale-125 drop-shadow-md"
+                />
+                <circle r="3" fill="#ffffff" />
 
                 {/* Pin Port Code Label */}
                 <text
-                  y="-14"
+                  y="-13"
                   textAnchor="middle"
-                  fill="#f8fafc"
-                  fontSize="9"
+                  fill="#a5f3fc"
+                  fontSize="8.5"
                   fontWeight="bold"
                   className="pointer-events-none drop-shadow-md font-mono"
                 >
-                  {port.locode}
+                  {pin.alternative.unlocode}
+                </text>
+                <text
+                  y="19"
+                  textAnchor="middle"
+                  fill="#34d399"
+                  fontSize="7.5"
+                  fontWeight="bold"
+                  className="pointer-events-none drop-shadow-md font-mono"
+                >
+                  +{pin.alternative.depthMarginM.toFixed(1)}m
                 </text>
               </g>
-            );
-          })}
+            ))}
+          </g>
+
+          {/* ── Monitored Primary Port Markers ── */}
+          <g data-testid="map-primary-pins">
+            {visiblePorts.map((port) => {
+              const { x, y } = projectCoordinates(port.lat, port.lon);
+              const assessment = assessments.get(port.id);
+              const tier = assessment?.compositeTier ?? 'low';
+              const isSelected = port.id === selectedPortId;
+
+              // Pin styling per tier
+              let pinColor = '#10B981'; // green / emerald
+              if (tier === 'medium') pinColor = '#F59E0B'; // amber
+              if (tier === 'high') pinColor = '#EF4444'; // red
+
+              return (
+                <g
+                  key={port.id}
+                  data-testid={`map-pin-${port.id}`}
+                  tabIndex={0}
+                  role="button"
+                  aria-label={`${port.name} - ${tier.toUpperCase()} Risk`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedPortId(port.id);
+                    setSelectedAlternative(null);
+                    if (onSelectPort) onSelectPort(port.id);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setSelectedPortId(port.id);
+                      setSelectedAlternative(null);
+                    }
+                  }}
+                  className="cursor-pointer focus:outline-none group"
+                  transform={`translate(${x}, ${y})`}
+                >
+                  {/* Micro tooltip / title */}
+                  <title>{`${port.name} (${port.locode})`}</title>
+
+                  {/* Pulsing selection aura */}
+                  {isSelected && (
+                    <circle
+                      r="18"
+                      fill={pinColor}
+                      opacity="0.3"
+                      className="animate-ping"
+                    />
+                  )}
+
+                  {/* Outer Ring */}
+                  <circle
+                    r={isSelected ? '12' : '9'}
+                    fill={pinColor}
+                    stroke="#ffffff"
+                    strokeWidth="2"
+                    className="transition-all duration-200 group-hover:scale-125"
+                  />
+
+                  {/* Inner Center Dot */}
+                  <circle r={isSelected ? '5' : '3.5'} fill="#ffffff" />
+
+                  {/* Pin Port Code Label */}
+                  <text
+                    y="-14"
+                    textAnchor="middle"
+                    fill="#f8fafc"
+                    fontSize="9"
+                    fontWeight="bold"
+                    className="pointer-events-none drop-shadow-md font-mono"
+                  >
+                    {port.locode}
+                  </text>
+                </g>
+              );
+            })}
+          </g>
         </g>
       </svg>
 
@@ -581,10 +821,183 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                 compositeTier={selectedAssessment.compositeTier}
                 alternatives={selectedAssessment.alternatives}
                 onSelectAlternative={(altId) => {
-                  setSelectedPortId(altId);
-                  if (onSelectPort) onSelectPort(altId);
+                  const candidate = selectedAssessment.alternatives?.find(
+                    (a) => a.portId === altId || a.unlocode === altId
+                  );
+                  if (candidate && selectedPort) {
+                    setSelectedAlternative({
+                      alternative: candidate,
+                      primaryPort: selectedPort,
+                    });
+                  } else if (onSelectPort) {
+                    onSelectPort(altId);
+                  }
                 }}
               />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Direct On-Map Tooltip Popup for Alternative Safe Haven ── */}
+      {selectedAlternative && (
+        <div
+          role="dialog"
+          aria-modal="false"
+          aria-label={`Safe Haven Alternative: ${selectedAlternative.alternative.portName}`}
+          data-testid="map-alt-popup"
+          className="absolute top-4 right-4 z-30 w-84 sm:w-96 max-h-[560px] overflow-y-auto bg-white rounded-xl shadow-2xl border-2 border-cyan-500 p-4 animate-in fade-in zoom-in-95 duration-150"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="flex items-start justify-between gap-2 pb-3 border-b border-cyan-100">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 mb-1">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-100 text-cyan-800 border border-cyan-300">
+                  <Compass className="w-3 h-3 text-cyan-600" />
+                  RECOMMENDED SAFE HAVEN
+                </span>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h4
+                  data-testid="alt-popup-title"
+                  className="text-sm font-bold text-slate-900 truncate"
+                >
+                  {selectedAlternative.alternative.portName}
+                </h4>
+                <span
+                  data-testid="alt-popup-locode"
+                  className="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-mono font-semibold bg-slate-100 text-slate-700 border border-slate-200"
+                >
+                  {selectedAlternative.alternative.unlocode}
+                </span>
+              </div>
+              <div
+                data-testid="alt-popup-diversion"
+                className="text-[11px] text-slate-500 mt-0.5"
+              >
+                {selectedAlternative.alternative.country} ·{' '}
+                <span className="font-semibold text-cyan-700">
+                  {selectedAlternative.alternative.distanceNm.toFixed(1)} NM diversion
+                </span>{' '}
+                from {selectedAlternative.primaryPort.name}
+              </div>
+            </div>
+
+            <button
+              onClick={() => setSelectedAlternative(null)}
+              aria-label="Close"
+              className="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer shrink-0"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Clearance & Proximity Stats */}
+          <div className="my-3 space-y-2">
+            <div className="grid grid-cols-2 gap-2 text-[11px]">
+              <div className="p-2 bg-emerald-50/80 rounded-lg border border-emerald-200">
+                <div className="text-[10px] text-emerald-800 font-semibold uppercase">
+                  UKC Margin
+                </div>
+                <div
+                  data-testid="alt-popup-ukc-margin"
+                  className="text-sm font-bold text-emerald-700"
+                >
+                  +{selectedAlternative.alternative.depthMarginM.toFixed(1)}m
+                </div>
+                <div className="text-[10px] text-emerald-600">Safe draft clearance</div>
+              </div>
+
+              <div className="p-2 bg-slate-50 rounded-lg border border-slate-200">
+                <div className="text-[10px] text-slate-500 font-semibold uppercase">
+                  Controlling Depth
+                </div>
+                <div
+                  data-testid="alt-popup-channel-depth"
+                  className="text-sm font-bold text-slate-800"
+                >
+                  {selectedAlternative.alternative.channelDepthM.toFixed(1)}m
+                </div>
+                <div className="text-[10px] text-slate-500">Channel baseline</div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-[11px]">
+              <div className="p-2 bg-slate-50 rounded-lg border border-slate-200">
+                <div className="text-[10px] text-slate-500 font-semibold uppercase">
+                  Swell / Waves
+                </div>
+                <div
+                  data-testid="alt-popup-swell"
+                  className="text-xs font-bold text-slate-800"
+                >
+                  {selectedAlternative.alternative.swellHeightM.toFixed(1)}m Swell
+                </div>
+              </div>
+
+              <div className="p-2 bg-slate-50 rounded-lg border border-slate-200">
+                <div className="text-[10px] text-slate-500 font-semibold uppercase">
+                  Queue / Traffic
+                </div>
+                <div
+                  data-testid="alt-popup-traffic"
+                  className="text-xs font-bold text-slate-800"
+                >
+                  {selectedAlternative.alternative.trafficStatus || 'Normal Queue'}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 1-Click + Add to Watchlist Action */}
+          {onAddPort && (
+            <div className="pt-3 border-t border-slate-100">
+              <button
+                data-testid="add-alt-to-watchlist"
+                disabled={
+                  addingAlt ||
+                  addedAltLocode === selectedAlternative.alternative.unlocode ||
+                  typeof selectedAlternative.alternative.lat !== 'number' ||
+                  typeof selectedAlternative.alternative.lon !== 'number'
+                }
+                onClick={async () => {
+                  const alt = selectedAlternative.alternative;
+                  if (typeof alt.lat !== 'number' || typeof alt.lon !== 'number') return;
+                  setAddingAlt(true);
+                  try {
+                    await onAddPort({
+                      name: alt.portName,
+                      locode: alt.unlocode,
+                      country: alt.country,
+                      lat: alt.lat,
+                      lon: alt.lon,
+                      geofenceRadiusNm: 25,
+                      vesselClass: vesselClass,
+                    });
+                    setAddedAltLocode(alt.unlocode);
+                  } finally {
+                    setAddingAlt(false);
+                  }
+                }}
+                className={`w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold shadow-sm transition-colors cursor-pointer ${
+                  addedAltLocode === selectedAlternative.alternative.unlocode
+                    ? 'bg-emerald-600 text-white cursor-default'
+                    : 'bg-cyan-600 hover:bg-cyan-700 text-white'
+                }`}
+              >
+                {addedAltLocode === selectedAlternative.alternative.unlocode ? (
+                  <>
+                    <Check className="w-4 h-4" />
+                    <span>Added to Watchlist</span>
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4" />
+                    <span>+ Add to Watchlist</span>
+                  </>
+                )}
+              </button>
             </div>
           )}
         </div>

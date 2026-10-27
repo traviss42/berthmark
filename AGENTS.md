@@ -9,6 +9,7 @@
 ## Rules
 - Dependencies belong in `pyproject.toml` (backend) and `package.json` (frontend). Do not add dependencies without asking.
 - Do not modify API endpoint structures without updating `openapi.yaml`.
+- Never hardcode data, coordinates, or domain lookup tables in application code. All operational and geospatial data must be resolved dynamically via database queries, schemas, or API contracts.
 - Commit code regularly to Git after completing logical sub-tasks.
 
 ## Documents

@@ -460,6 +460,7 @@ function Dashboard({ onNavigate }: DashboardProps) {
                     const input = document.getElementById('port-search-input');
                     input?.focus();
                   }}
+                  onAddPort={addPort}
                 />
               ) : (
                 <PortList
