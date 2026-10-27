@@ -1085,6 +1085,26 @@ components:
           nullable: true
           description: Rolling historical average waiting time in hours (null if collecting baseline).
           example: 12.0
+        isColdStart:
+          type: boolean
+          nullable: true
+          description: Whether the port baseline is currently collecting observations.
+          example: false
+        isInitializing:
+          type: boolean
+          nullable: true
+          description: Whether the port is within the initial 10-15 minute AIS ping accumulation window.
+          example: false
+        underwayCount:
+          type: integer
+          nullable: true
+          description: Count of underway vessels currently within geofence.
+          example: 8
+        baselineDaysCollected:
+          type: integer
+          nullable: true
+          description: Number of days of historical traffic observations collected so far towards the 30-day baseline.
+          example: 12
 
     TerminalMetrics:
       type: object
@@ -1310,6 +1330,14 @@ components:
               $ref: '#/components/schemas/SubRiskResult'
         metrics:
           $ref: '#/components/schemas/PortMetrics'
+        isColdStart:
+          type: boolean
+          nullable: true
+          description: True if port is currently collecting baseline observations.
+        isInitializing:
+          type: boolean
+          nullable: true
+          description: True during the 10-15 minute initial ping accumulation window.
         alternatives:
           type: array
           description: Recommended alternative diversion ports when composite risk is High or Critical.

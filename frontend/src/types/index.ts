@@ -59,6 +59,10 @@ export interface CongestionMetrics {
   berthOccupancyPct: number;
   rolling30dAvgQueue: number | null;
   rolling30dAvgWaitHours: number | null;
+  isColdStart?: boolean;
+  isInitializing?: boolean;
+  underwayCount?: number;
+  baselineDaysCollected?: number | null;
 }
 
 export interface TerminalMetrics {
@@ -127,6 +131,8 @@ export interface RiskAssessment {
   compositeScore: number;
   subRisks: Record<SubRiskCategory, SubRiskResult>;
   metrics: PortMetrics;
+  isColdStart?: boolean;
+  isInitializing?: boolean;
   alternatives?: AlternativePortRecommendation[];
 }
 

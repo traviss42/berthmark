@@ -785,7 +785,8 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                       {
                         formatQueueVariance(
                           selectedAssessment.metrics.congestion.anchorageQueueCount,
-                          selectedAssessment.metrics.congestion.rolling30dAvgQueue
+                          selectedAssessment.metrics.congestion.rolling30dAvgQueue,
+                          selectedAssessment.metrics.congestion.baselineDaysCollected
                         ).text
                       }
                     </span>

@@ -15,6 +15,10 @@ class CongestionMetrics(BaseModel):
     berthOccupancyPct: float = Field(..., ge=0.0, le=100.0, description="Current berth occupancy percentage.")
     rolling30dAvgQueue: float | None = Field(default=None, description="Rolling historical average queue count (None if collecting baseline).")
     rolling30dAvgWaitHours: float | None = Field(default=None, description="Rolling historical average wait hours.")
+    isColdStart: bool | None = Field(default=False, description="Whether the port baseline is currently collecting observations.")
+    isInitializing: bool | None = Field(default=False, description="Whether the port is within the initial 10-15 minute AIS ping accumulation window.")
+    underwayCount: int | None = Field(default=None, description="Count of underway vessels currently within geofence.")
+    baselineDaysCollected: int | None = Field(default=None, description="Number of days of historical traffic observations collected so far towards the 30-day baseline.")
 
 
 class TerminalMetrics(BaseModel):

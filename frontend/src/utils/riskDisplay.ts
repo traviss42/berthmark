@@ -88,22 +88,35 @@ export function formatVesselClass(vesselClass: string): string {
 
 export function formatQueueVariance(
   anchored: number,
-  baselineAvg: number | null | undefined
+  baselineAvg: number | null | undefined,
+  daysCollected?: number | null
 ): { text: string; value: number | null } {
   if (baselineAvg === null || baselineAvg === undefined || isNaN(baselineAvg)) {
     return { text: 'N/A — Collecting Baseline', value: null };
   }
+
+  let baselineLabel = '7-day Avg';
+  if (daysCollected !== undefined && daysCollected !== null) {
+    if (daysCollected >= 30) {
+      baselineLabel = '30-day Avg';
+    } else if (daysCollected === 1) {
+      baselineLabel = '1-day Avg';
+    } else {
+      baselineLabel = `${daysCollected}-day Avg`;
+    }
+  }
+
   if (baselineAvg === 0) {
     if (anchored === 0) {
-      return { text: '0% vs 7-day Avg', value: 0 };
+      return { text: `0% vs ${baselineLabel}`, value: 0 };
     }
-    return { text: '+100% vs 7-day Avg', value: 100 };
+    return { text: `+100% vs ${baselineLabel}`, value: 100 };
   }
   const variance = ((anchored - baselineAvg) / baselineAvg) * 100;
   const rounded = Math.round(variance);
   const sign = rounded > 0 ? '+' : '';
   return {
-    text: `${sign}${rounded}% vs 7-day Avg`,
+    text: `${sign}${rounded}% vs ${baselineLabel}`,
     value: rounded,
   };
 }

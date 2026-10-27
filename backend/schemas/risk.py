@@ -87,6 +87,8 @@ class RiskAssessment(BaseModel):
     compositeScore: float = Field(..., ge=0.0, le=100.0, description="Overall composite score (0-100).")
     subRisks: SubRisksDict
     metrics: PortMetrics
+    isColdStart: bool | None = Field(default=False, description="True if port is currently collecting baseline observations.")
+    isInitializing: bool | None = Field(default=False, description="True during the 10-15 minute initial ping accumulation window.")
     alternatives: list[AlternativePortRecommendation] = Field(
         default_factory=list,
         description="Recommended alternative diversion ports when composite risk is High or Critical.",

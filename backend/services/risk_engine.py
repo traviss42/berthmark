@@ -25,6 +25,7 @@ from backend.services.congestion import (
     assess_congestion_risk,
     calculate_queue_variance,
     get_port_traffic_baseline,
+    get_rolling_congestion_baseline,
 )
 from backend.services.navigational import calculate_navigational_metrics
 from backend.services.port_metrics import assemble_port_metrics
@@ -182,6 +183,8 @@ def assemble_risk_assessment(
     metrics: PortMetrics,
     timestamp: datetime | None = None,
     alternatives: list[AlternativePortRecommendation] | None = None,
+    is_cold_start: bool | None = None,
+    is_initializing: bool | None = None,
 ) -> RiskAssessment:
     """Pure assembly of RiskAssessment payload conforming to OpenAPI schema."""
     if vessel_class not in VALID_VESSEL_CLASSES:
@@ -197,6 +200,9 @@ def assemble_risk_assessment(
 
     composite_tier, composite_score = determine_composite_tier(sub_risks)
 
+    cold_start = is_cold_start if is_cold_start is not None else bool(getattr(metrics.congestion, "isColdStart", False))
+    initializing = is_initializing if is_initializing is not None else bool(getattr(metrics.congestion, "isInitializing", False))
+
     return RiskAssessment(
         id=assessment_id,
         portId=port_id,
@@ -208,6 +214,8 @@ def assemble_risk_assessment(
         compositeScore=composite_score,
         subRisks=sub_risks,
         metrics=metrics,
+        isColdStart=cold_start,
+        isInitializing=initializing,
         alternatives=alternatives or [],
     )
 
@@ -288,7 +296,7 @@ async def persist_risk_assessment(
             )
 
     # 3. Build snapshot record
-    underway_count = 0
+    underway_count = metrics.congestion.underwayCount or 0
     anchored_count = metrics.congestion.anchorageQueueCount
     hist_avg = metrics.congestion.rolling30dAvgQueue
     variance_pct = calculate_queue_variance(anchored_count, hist_avg)
@@ -369,13 +377,13 @@ async def calculate_port_risk(
     weather_subrisk = evaluate_weather_risk(weather_metrics)
 
     # 2. Congestion domain
-    baseline = await get_port_traffic_baseline(session, port.unlocode, ts)
-    hist_avg = baseline.avg_anchored_count if baseline else None
+    hist_avg, days_collected = await get_rolling_congestion_baseline(session, port.unlocode, ts)
 
     # Fetch live counts from override, latest snapshot, or default
     if anchored_count_override is not None:
         anchored_count = anchored_count_override
         underway_count = underway_count_override if underway_count_override is not None else 0
+        is_initializing = False
     else:
         snap_stmt = (
             select(PortRiskSnapshot)
@@ -388,14 +396,18 @@ async def calculate_port_risk(
         if snap:
             anchored_count = snap.anchored_vessel_count
             underway_count = snap.underway_vessel_count
+            is_initializing = False
         else:
-            anchored_count = int(hist_avg) if hist_avg is not None else 0
+            anchored_count = None
             underway_count = 0
+            is_initializing = True
 
     congestion_assessment = assess_congestion_risk(
         anchored_count=anchored_count,
         hist_avg_anchored=hist_avg,
         underway_count=underway_count,
+        is_initializing=is_initializing,
+        baseline_days_collected=days_collected,
     )
     congestion_subrisk = SubRiskResult(**congestion_assessment.to_subrisk_result())
     congestion_metrics = CongestionMetrics(**congestion_assessment.to_congestion_metrics())
@@ -474,6 +486,8 @@ async def calculate_port_risk(
         metrics=unified_metrics,
         timestamp=ts,
         alternatives=alternatives,
+        is_cold_start=congestion_metrics.isColdStart,
+        is_initializing=congestion_metrics.isInitializing,
     )
 
     # 6. Atomic persistence of snapshot & alerts
@@ -635,19 +649,47 @@ async def calculate_bulk_risk(
         if s.unlocode.upper() not in snapshots_by_locode:
             snapshots_by_locode[s.unlocode.upper()] = s
 
+    # 5b. Query 30-day historical snapshots for rolling baseline refinement in ONE batched query
+    cutoff_30d = ts - timedelta(days=30)
+    history_stmt = (
+        select(
+            PortRiskSnapshot.unlocode,
+            PortRiskSnapshot.anchored_vessel_count,
+            PortRiskSnapshot.updated_at,
+        )
+        .where(
+            PortRiskSnapshot.unlocode.in_(locode_keys),
+            PortRiskSnapshot.updated_at >= cutoff_30d,
+        )
+    )
+    h_res = await session.execute(history_stmt)
+    history_by_locode: dict[str, list[tuple[int, Any]]] = {}
+    for unlocode, count, updated_at in h_res.all():
+        history_by_locode.setdefault(unlocode.upper(), []).append((count, updated_at))
+
     # 6. Concurrently evaluate each resolved port in-memory
     async def evaluate_item(item: BulkRiskPortItem, port: Port) -> RiskAssessment:
         locode = port.unlocode.upper()
-        baseline = baselines_by_locode.get(locode)
-        hist_avg = baseline.avg_anchored_count if baseline else None
-        snap = snapshots_by_locode.get(locode)
+        hist_list = history_by_locode.get(locode)
+        if hist_list:
+            counts = [c for c, _ in hist_list if c is not None]
+            dates = {u.date() if hasattr(u, "date") else u for _, u in hist_list if u is not None}
+            hist_avg = round(sum(counts) / len(counts), 1) if counts else None
+            days_collected = min(30, max(1, len(dates)))
+        else:
+            baseline = baselines_by_locode.get(locode)
+            hist_avg = round(baseline.avg_anchored_count, 1) if baseline else None
+            days_collected = 30 if baseline else 0
 
-        anchored_count = (
-            snap.anchored_vessel_count
-            if snap
-            else (int(hist_avg) if hist_avg is not None else 0)
-        )
-        underway_count = snap.underway_vessel_count if snap else 0
+        snap = snapshots_by_locode.get(locode)
+        if snap:
+            anchored_count = snap.anchored_vessel_count
+            underway_count = snap.underway_vessel_count
+            is_initializing = False
+        else:
+            anchored_count = None
+            underway_count = 0
+            is_initializing = True
 
         weather_metrics = WeatherMetrics(
             windSpeedKnots=snap.wind_speed_kts if snap and snap.wind_speed_kts is not None else 12.0,
@@ -662,6 +704,8 @@ async def calculate_bulk_risk(
             anchored_count=anchored_count,
             hist_avg_anchored=hist_avg,
             underway_count=underway_count,
+            is_initializing=is_initializing,
+            baseline_days_collected=days_collected,
         )
         congestion_subrisk = SubRiskResult(**congestion_assessment.to_subrisk_result())
         congestion_metrics = CongestionMetrics(**congestion_assessment.to_congestion_metrics())
@@ -718,6 +762,8 @@ async def calculate_bulk_risk(
             metrics=unified_metrics,
             timestamp=ts,
             alternatives=[],
+            is_cold_start=congestion_metrics.isColdStart,
+            is_initializing=congestion_metrics.isInitializing,
         )
 
     tasks = [evaluate_item(item, port) for item, port in resolved_pairs]
@@ -806,6 +852,10 @@ def snapshot_to_risk_assessment(
             berthOccupancyPct=round(min(100.0, max(20.0, snapshot.anchored_vessel_count * 5.0)), 1),
             rolling30dAvgQueue=snapshot.historical_avg_queue,
             rolling30dAvgWaitHours=12.0,
+            underwayCount=snapshot.underway_vessel_count,
+            baselineDaysCollected=30 if snapshot.historical_avg_queue > 0 else 0,
+            isColdStart=snapshot.historical_avg_queue == 0.0,
+            isInitializing=False,
         ),
         weather=WeatherMetrics(
             windSpeedKnots=snapshot.wind_speed_kts or 10.0,
@@ -836,6 +886,8 @@ def snapshot_to_risk_assessment(
         compositeScore=comp_score,
         subRisks=sub_risks,
         metrics=metrics,
+        isColdStart=snapshot.historical_avg_queue == 0.0,
+        isInitializing=False,
         alternatives=alternatives or [],
     )
 

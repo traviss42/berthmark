@@ -114,6 +114,18 @@ export function PortRiskDetail({ assessment, onBack, onRemove, canRemove, onRefr
                     : 'N/A — Collecting Baseline'
                 }
               />
+              <Metric
+                label="Baseline Progress"
+                value={
+                  m.congestion.baselineDaysCollected !== null && m.congestion.baselineDaysCollected !== undefined
+                    ? `${m.congestion.baselineDaysCollected} / 30 Days`
+                    : (m.congestion.rolling30dAvgQueue !== null ? '30 / 30 Days' : 'Collecting (Day 1)')
+                }
+              />
+              <Metric
+                label="Underway"
+                value={`${m.congestion.underwayCount ?? 0} vessels`}
+              />
             </div>
           </div>
 

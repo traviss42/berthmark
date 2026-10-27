@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { assessRisk, computeCompositeTier } from '@/services/riskEngine';
+import { formatQueueVariance } from '@/utils/riskDisplay';
 import { generateMockMetrics } from '@/data/mockData';
 import type { PortMetrics, SubRiskResult, SubRiskCategory, RiskTier } from '@/types';
 
@@ -123,5 +124,40 @@ describe('Risk Engine - Weather assessment by vessel class', () => {
     expect(pctcAssessment.subRisks.weather.tier).not.toBe('low');
     // Feeder windHigh is 45 — 25kn should be low
     expect(feederAssessment.subRisks.weather.tier).toBe('low');
+  });
+});
+
+describe('Queue Variance Baseline Refinement (formatQueueVariance)', () => {
+  it('returns N/A when baseline average is null or undefined', () => {
+    expect(formatQueueVariance(10, null).text).toBe('N/A — Collecting Baseline');
+    expect(formatQueueVariance(10, undefined).text).toBe('N/A — Collecting Baseline');
+    expect(formatQueueVariance(10, null).value).toBeNull();
+  });
+
+  it('formats backward compatible vs 7-day Avg when daysCollected is omitted', () => {
+    const res = formatQueueVariance(15, 12);
+    expect(res.text).toBe('+25% vs 7-day Avg');
+    expect(res.value).toBe(25);
+  });
+
+  it('formats day-specific baseline label when daysCollected < 30', () => {
+    // 1-day empirical baseline
+    expect(formatQueueVariance(15, 12, 1).text).toBe('+25% vs 1-day Avg');
+
+    // 5-day empirical baseline
+    expect(formatQueueVariance(15, 12, 5).text).toBe('+25% vs 5-day Avg');
+
+    // 14-day empirical baseline
+    expect(formatQueueVariance(9, 12, 14).text).toBe('-25% vs 14-day Avg');
+  });
+
+  it('formats 30-day Avg once 30+ days of observations have accumulated', () => {
+    expect(formatQueueVariance(15, 12, 30).text).toBe('+25% vs 30-day Avg');
+    expect(formatQueueVariance(15, 12, 45).text).toBe('+25% vs 30-day Avg');
+  });
+
+  it('handles zero baseline edge cases', () => {
+    expect(formatQueueVariance(0, 0, 30).text).toBe('0% vs 30-day Avg');
+    expect(formatQueueVariance(5, 0, 30).text).toBe('+100% vs 30-day Avg');
   });
 });

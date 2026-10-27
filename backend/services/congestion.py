@@ -1,13 +1,13 @@
 """Port traffic congestion risk evaluation and anomaly assessment engine."""
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.models import PortTrafficBaseline, utc_now
+from backend.models import PortRiskSnapshot, PortTrafficBaseline, utc_now
 
 
 def calculate_queue_variance(anchored_count: int, hist_avg_anchored: float | None) -> float | None:
@@ -47,6 +47,8 @@ class CongestionAssessment:
     detail: str
     factors: list[str]
     is_cold_start: bool
+    is_initializing: bool = False
+    baseline_days_collected: int | None = None
 
     def to_subrisk_result(self) -> dict[str, Any]:
         """Convert assessment into OpenAPI SubRiskResult schema object."""
@@ -90,6 +92,10 @@ class CongestionAssessment:
             "berthOccupancyPct": occupancy,
             "rolling30dAvgQueue": round(self.hist_avg_anchored, 1) if self.hist_avg_anchored is not None else None,
             "rolling30dAvgWaitHours": avg_wait,
+            "isColdStart": self.is_cold_start,
+            "isInitializing": self.is_initializing,
+            "underwayCount": self.underway_count,
+            "baselineDaysCollected": self.baseline_days_collected,
         }
 
 
@@ -97,6 +103,8 @@ def assess_congestion_risk(
     anchored_count: int | None,
     hist_avg_anchored: float | None = None,
     underway_count: int = 0,
+    is_initializing: bool | None = None,
+    baseline_days_collected: int | None = None,
 ) -> CongestionAssessment:
     """Evaluate port congestion risk based on current anchored queue and historical baseline.
 
@@ -112,10 +120,12 @@ def assess_congestion_risk(
         - MEDIUM: (6 <= N_anchored <= 15 OR +30.0% <= ΔQ_pct <= +75.0%) AND not HIGH
         - LOW: 0 <= N_anchored <= 5 AND ΔQ_pct < +30.0%
     """
-    # 1. Uninitialized live count (prior to live AIS ping aggregation)
-    if anchored_count is None:
+    is_init = is_initializing if is_initializing is not None else (anchored_count is None)
+
+    # 1. Uninitialized live count (prior to live AIS ping aggregation completion)
+    if is_init or anchored_count is None:
         return CongestionAssessment(
-            anchored_count=None,
+            anchored_count=anchored_count,
             underway_count=underway_count,
             hist_avg_anchored=hist_avg_anchored,
             queue_variance_pct=None,
@@ -123,7 +133,9 @@ def assess_congestion_risk(
             score=25.0,
             detail="Initializing live traffic (collecting AIS pings)...",
             factors=["Live anchorage queue initializing; defaulting to safe tier."],
-            is_cold_start=hist_avg_anchored is None,
+            is_cold_start=hist_avg_anchored is None or (baseline_days_collected is not None and baseline_days_collected < 30),
+            is_initializing=True,
+            baseline_days_collected=baseline_days_collected,
         )
 
     # 2. Cold-start handling (missing historical baseline)
@@ -163,6 +175,8 @@ def assess_congestion_risk(
             detail=detail,
             factors=factors,
             is_cold_start=True,
+            is_initializing=False,
+            baseline_days_collected=baseline_days_collected or 0,
         )
 
     # 3. Standard assessment with historical baseline
@@ -204,6 +218,7 @@ def assess_congestion_risk(
         factors.append(f"Anchored queue count {anchored_count} within normal bounds (0-5).")
         factors.append(f"Queue variance {variance_pct:+.1f}% within baseline limits (<+30.0%).")
 
+    is_mature = baseline_days_collected is not None and baseline_days_collected >= 30
     return CongestionAssessment(
         anchored_count=anchored_count,
         underway_count=underway_count,
@@ -213,11 +228,59 @@ def assess_congestion_risk(
         score=score,
         detail=detail,
         factors=factors,
-        is_cold_start=False,
+        is_cold_start=not is_mature if baseline_days_collected is not None else False,
+        is_initializing=False,
+        baseline_days_collected=baseline_days_collected,
     )
 
 
 # ─── Database Access & Real Baseline Rolling Average Updates ──────────────────
+
+async def get_rolling_congestion_baseline(
+    session: AsyncSession,
+    unlocode: str,
+    timestamp: datetime | None = None,
+    max_days: int = 30,
+) -> tuple[float | None, int | None]:
+    """Retrieve or compute historical traffic moving average up to 30 days.
+
+    Queries PortRiskSnapshot over the rolling 30-day window to dynamically refine
+    the empirical queue baseline as days go on. If empirical snapshots exist, calculates the
+    average queue count and number of distinct observation days collected.
+
+    If no snapshot history exists yet, checks PortTrafficBaseline for the slot (pre-seeded).
+    Returns (None, 0) if no baseline data exists at all.
+    """
+    clean_locode = unlocode.strip().upper()
+    now_dt = timestamp if timestamp is not None else utc_now()
+    if now_dt.tzinfo is None:
+        now_dt = now_dt.replace(tzinfo=timezone.utc)
+    cutoff = now_dt - timedelta(days=max_days)
+
+    stmt = (
+        select(PortRiskSnapshot.anchored_vessel_count, PortRiskSnapshot.updated_at)
+        .where(
+            PortRiskSnapshot.unlocode == clean_locode,
+            PortRiskSnapshot.updated_at >= cutoff,
+        )
+    )
+    res = await session.execute(stmt)
+    rows = res.all()
+
+    if rows:
+        counts = [r[0] for r in rows if r[0] is not None]
+        dates = {r[1].date() if hasattr(r[1], "date") else r[1] for r in rows if r[1] is not None}
+        avg_queue = sum(counts) / len(counts) if counts else 0.0
+        days_collected = min(max_days, max(1, len(dates)))
+        return round(float(avg_queue), 1), days_collected
+
+    # Fallback to slot baseline if available
+    slot_baseline = await get_port_traffic_baseline(session, clean_locode, now_dt)
+    if slot_baseline:
+        return round(float(slot_baseline.avg_anchored_count), 1), 30
+
+    return None, 0
+
 
 async def get_port_traffic_baseline(
     session: AsyncSession,

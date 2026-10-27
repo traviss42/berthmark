@@ -1,17 +1,19 @@
 """Unit and integration tests for Port Traffic Baselines and Congestion Risk Module."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+import uuid
 import pytest
 import pytest_asyncio
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from backend.models import Base, Port, PortTrafficBaseline
+from backend.models import Base, Port, PortRiskSnapshot, PortTrafficBaseline, VesselClass
 from backend.services.congestion import (
     assess_congestion_risk,
     calculate_queue_variance,
     get_baseline_slot,
     get_port_traffic_baseline,
+    get_rolling_congestion_baseline,
     update_port_traffic_baseline_from_observation,
 )
 
@@ -46,7 +48,15 @@ async def baseline_test_db():
             is_depth_available=True,
             reconciliation_method="EXACT_UNLOCODE",
         )
+        vc = VesselClass(
+            class_id="panamax",
+            class_name="Panamax",
+            draft_m=12.0,
+            beam_m=32.2,
+            loa_m=225.0,
+        )
         session.add(port)
+        session.add(vc)
         await session.commit()
 
     yield session_factory
@@ -281,3 +291,145 @@ async def test_no_synthetic_data_in_fresh_database(baseline_test_db):
         assert assessment.queue_variance_pct is None
         assert assessment.tier == "low"
         assert assessment.score == 25.0
+
+
+@pytest.mark.asyncio
+async def test_get_rolling_congestion_baseline_refinement(baseline_test_db):
+    """Verify empirical baseline refines dynamically as days go on up to 30 days."""
+    session_factory = baseline_test_db
+    now = datetime(2026, 10, 27, 12, 0, tzinfo=timezone.utc)
+
+    async with session_factory() as session:
+        # 1. Day 1: Single observation
+        snap1 = PortRiskSnapshot(
+            snapshot_id=uuid.uuid4(),
+            unlocode="NLRTM",
+            vessel_class_id="panamax",
+            anchored_vessel_count=10,
+            underway_vessel_count=5,
+            total_active_geofence_count=15,
+            historical_avg_queue=0.0,
+            queue_variance_pct=0.0,
+            congestion_risk_level="LOW",
+            updated_at=now - timedelta(days=20),
+        )
+        session.add(snap1)
+        await session.commit()
+
+        avg_queue, days_collected = await get_rolling_congestion_baseline(
+            session, "NLRTM", timestamp=now, max_days=30
+        )
+        assert avg_queue == 10.0
+        assert days_collected == 1
+
+        # 2. Add Day 2 observation (14 anchored)
+        snap2 = PortRiskSnapshot(
+            snapshot_id=uuid.uuid4(),
+            unlocode="NLRTM",
+            vessel_class_id="panamax",
+            anchored_vessel_count=14,
+            underway_vessel_count=6,
+            total_active_geofence_count=20,
+            historical_avg_queue=10.0,
+            queue_variance_pct=0.0,
+            congestion_risk_level="LOW",
+            updated_at=now - timedelta(days=10),
+        )
+        session.add(snap2)
+        await session.commit()
+
+        avg_queue, days_collected = await get_rolling_congestion_baseline(
+            session, "NLRTM", timestamp=now, max_days=30
+        )
+        # Average: (10 + 14) / 2 = 12.0 over 2 distinct days
+        assert avg_queue == 12.0
+        assert days_collected == 2
+
+        # 3. Add Day 3 observation (18 anchored)
+        snap3 = PortRiskSnapshot(
+            snapshot_id=uuid.uuid4(),
+            unlocode="NLRTM",
+            vessel_class_id="panamax",
+            anchored_vessel_count=18,
+            underway_vessel_count=7,
+            total_active_geofence_count=25,
+            historical_avg_queue=12.0,
+            queue_variance_pct=0.0,
+            congestion_risk_level="MEDIUM",
+            updated_at=now - timedelta(days=1),
+        )
+        session.add(snap3)
+        await session.commit()
+
+        avg_queue, days_collected = await get_rolling_congestion_baseline(
+            session, "NLRTM", timestamp=now, max_days=30
+        )
+        # Average: (10 + 14 + 18) / 3 = 14.0 over 3 distinct days
+        assert avg_queue == 14.0
+        assert days_collected == 3
+
+        # 4. Observation older than 30 days is excluded
+        snap_old = PortRiskSnapshot(
+            snapshot_id=uuid.uuid4(),
+            unlocode="NLRTM",
+            vessel_class_id="panamax",
+            anchored_vessel_count=100,
+            underway_vessel_count=50,
+            total_active_geofence_count=150,
+            historical_avg_queue=0.0,
+            queue_variance_pct=0.0,
+            congestion_risk_level="HIGH",
+            updated_at=now - timedelta(days=45),  # Beyond 30-day cutoff
+        )
+        session.add(snap_old)
+        await session.commit()
+
+        avg_queue, days_collected = await get_rolling_congestion_baseline(
+            session, "NLRTM", timestamp=now, max_days=30
+        )
+        # Excludes 100 from day 45; average remains 14.0 over 3 days
+        assert avg_queue == 14.0
+        assert days_collected == 3
+
+
+def test_cold_start_initialization_window_and_transition():
+    """Verify 10-15 minute initial count window and transition to live traffic counts."""
+    # 1. During 15-minute ping collection window (cold-start)
+    init_res = assess_congestion_risk(
+        anchored_count=None,
+        hist_avg_anchored=None,
+        is_initializing=True,
+    )
+    assert init_res.is_initializing is True
+    assert init_res.is_cold_start is True
+    assert init_res.tier == "low"
+    assert init_res.score == 25.0
+    assert "Initializing live traffic" in init_res.detail
+
+    init_metrics = init_res.to_congestion_metrics()
+    assert init_metrics["isInitializing"] is True
+    assert init_metrics["isColdStart"] is True
+    assert init_metrics["rolling30dAvgQueue"] is None
+    assert init_metrics["anchorageQueueCount"] == 0
+
+    # 2. Transition after 15 minutes: live counts recorded (14 Anchored, 6 Underway)
+    live_res = assess_congestion_risk(
+        anchored_count=14,
+        hist_avg_anchored=11.2,
+        underway_count=6,
+        is_initializing=False,
+        baseline_days_collected=5,
+    )
+    assert live_res.is_initializing is False
+    assert live_res.is_cold_start is True  # 5 days < 30 days: refining baseline
+    assert live_res.baseline_days_collected == 5
+    assert live_res.anchored_count == 14
+    assert live_res.underway_count == 6
+
+    live_metrics = live_res.to_congestion_metrics()
+    assert live_metrics["isInitializing"] is False
+    assert live_metrics["isColdStart"] is True
+    assert live_metrics["anchorageQueueCount"] == 14
+    assert live_metrics["underwayCount"] == 6
+    assert live_metrics["baselineDaysCollected"] == 5
+    assert live_metrics["rolling30dAvgQueue"] == 11.2

@@ -67,7 +67,11 @@ export const PortCard: React.FC<PortCardProps> = ({
     congestion?.rolling30dAvgQueue ??
     null;
 
-  const queueVariance = formatQueueVariance(anchoredCount, baselineAvg);
+  const queueVariance = formatQueueVariance(
+    anchoredCount,
+    baselineAvg,
+    congestion?.baselineDaysCollected
+  );
 
   // Depth & Navigational metrics
   const navigational = assessment?.metrics?.navigational;
