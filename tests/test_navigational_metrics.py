@@ -23,15 +23,15 @@ def test_dynamic_ukc_with_tides_and_swells():
     assert metrics_calm.tideHeightM == 1.5
     assert subrisk_calm.tier == "low"
 
-    # Heavy swell (Hs=3.0m > 2.0m): req = 1.35 * 12.0 = 16.20m
-    # Depth = 14.0m, Tide = 0.0m -> Total = 14.0m -> UKC = 14.0 - 16.20 = -2.20m -> HIGH
+    # Heavy swell (Hs=3.0m > 2.0m): req = 1.30 * 12.0 = 15.60m
+    # Depth = 14.0m, Tide = 0.0m -> Total = 14.0m -> UKC = 14.0 - 15.60 = -1.60m -> HIGH
     metrics_heavy, subrisk_heavy = calculate_navigational_metrics(
         vessel_class="panamax",
         channel_depth_m=14.0,
         wave_height_m=3.0,
         tide_height_m=0.0,
     )
-    assert metrics_heavy.underKeelClearanceM == -2.20
+    assert metrics_heavy.underKeelClearanceM == -1.60
     assert subrisk_heavy.tier == "high"
 
 

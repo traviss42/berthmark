@@ -365,8 +365,8 @@ async def test_end_to_end_user_journey(e2e_test_db):
             # STEP 4: Differential Class Risk Calculation & Diversion Recommendations
             # ─────────────────────────────────────────────────────────────────
             # 4a. Grounding risk for Rotterdam channel (16.5m depth) under heavy swell Hs=2.8m
-            # For VLCC: Draft = 21.0m. Swell multiplier 1.35 -> h_req = 28.35m.
-            # Channel depth 16.5m < 28.35m -> UKC margin = -11.85m -> HIGH RISK (Score 90.0)
+            # For VLCC: Draft = 21.0m. Swell multiplier 1.30 -> h_req = 27.30m.
+            # Channel depth 16.5m < 27.30m -> UKC margin = -10.80m -> HIGH RISK (Score 90.0)
             vlcc_risk = calculate_grounding_risk(
                 vessel_class="vlcc",
                 channel_depth_m=16.5,
@@ -375,10 +375,10 @@ async def test_end_to_end_user_journey(e2e_test_db):
             assert vlcc_risk.tier == "high"
             assert vlcc_risk.score == 90.0
             assert vlcc_risk.ukc_margin_m is not None and vlcc_risk.ukc_margin_m < 0.0
-            assert vlcc_risk.required_depth_m == 28.35
+            assert vlcc_risk.required_depth_m == 27.30
 
-            # For Handymax/Handysize: Draft = 10.5m. Swell multiplier 1.35 -> h_req = 14.18m.
-            # Channel depth 16.5m - 14.18m = +2.32m >= 1.0m -> LOW RISK (Score 25.0)
+            # For Handymax/Handysize: Draft = 10.5m. Swell multiplier 1.30 -> h_req = 13.65m.
+            # Channel depth 16.5m - 13.65m = +2.85m >= 1.0m -> LOW RISK (Score 25.0)
             handy_risk = calculate_grounding_risk(
                 vessel_class="handysize",
                 channel_depth_m=16.5,
@@ -387,7 +387,7 @@ async def test_end_to_end_user_journey(e2e_test_db):
             assert handy_risk.tier == "low"
             assert handy_risk.score == 25.0
             assert handy_risk.ukc_margin_m is not None and handy_risk.ukc_margin_m >= 1.0
-            assert handy_risk.required_depth_m == 14.18
+            assert handy_risk.required_depth_m == 13.65
 
             # 4b. Missing depth edge case: Port with is_depth_available = False
             missing_depth_risk = calculate_grounding_risk(

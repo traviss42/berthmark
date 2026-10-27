@@ -2,9 +2,7 @@
 
 from backend.schemas.metrics import NavigationalMetrics, SubRiskResult
 from backend.services.grounding import (
-    CALM_SWELL_MULTIPLIER,
-    DEFAULT_HEAVY_SWELL_MULTIPLIER,
-    SWELL_HEIGHT_THRESHOLD_M,
+    calculate_grounding_risk,
     get_vessel_draft,
 )
 
@@ -40,46 +38,26 @@ def calculate_navigational_metrics(
     """Calculate dynamic navigational metrics and evaluate composite navigational sub-risk.
 
     Evaluates:
-        1. Dynamic Under-Keel Clearance (UKC) adjusting for tidal elevation and swell.
+        1. Dynamic Under-Keel Clearance (UKC) adjusting for tidal elevation, wave swell, and inner basin tiers.
         2. Air draft clearance beneath overhead bridges/cables.
         3. Harbor pilotage service availability under wind/swell conditions.
 
     Returns:
         Tuple of (NavigationalMetrics, SubRiskResult).
     """
-    # 1. Draft & UKC calculation
-    draft_m = custom_draft_m if custom_draft_m is not None else get_vessel_draft(vessel_class)
-    multiplier = (
-        CALM_SWELL_MULTIPLIER
-        if wave_height_m <= SWELL_HEIGHT_THRESHOLD_M
-        else DEFAULT_HEAVY_SWELL_MULTIPLIER
+    # 1. Grounding and UKC calculation via PIANC grounding engine
+    grounding_res = calculate_grounding_risk(
+        vessel_class=vessel_class,
+        channel_depth_m=channel_depth_m,
+        wave_height_m=wave_height_m,
+        tide_offset_m=tide_height_m,
+        custom_draft_m=custom_draft_m,
     )
-    req_depth_m = round(multiplier * draft_m, 2)
+    ukc_tier = grounding_res.tier
+    ukc_margin_m = grounding_res.ukc_margin_m if grounding_res.ukc_margin_m is not None else 0.0
+    effective_channel_depth = grounding_res.channel_depth_m if grounding_res.channel_depth_m is not None else 0.0
 
-    has_depth = channel_depth_m is not None and channel_depth_m > 0.0
-    effective_channel_depth = float(channel_depth_m) if has_depth else 0.0
-
-    factors: list[str] = []
-
-    if has_depth:
-        # Dynamic controlling depth incorporates tidal water elevation
-        total_water_depth = effective_channel_depth + tide_height_m
-        ukc_margin_m = round(total_water_depth - req_depth_m, 2)
-        factors.append(
-            f"Under-Keel Clearance: {ukc_margin_m:+.2f}m (depth {effective_channel_depth:.1f}m + tide {tide_height_m:+.1f}m - required {req_depth_m:.2f}m)"
-        )
-        if ukc_margin_m >= 1.00:
-            ukc_tier = "low"
-        elif ukc_margin_m >= 0.00:
-            ukc_tier = "medium"
-            factors.append("Marginal Under-Keel Clearance (<1.00m); transit window restricted.")
-        else:
-            ukc_tier = "high"
-            factors.append(f"Grounding hazard: Depth deficit of {abs(ukc_margin_m):.2f}m below required UKC.")
-    else:
-        ukc_margin_m = 0.0
-        ukc_tier = "low"
-        factors.append("Controlling channel depth unverified or missing; physical grounding risk cannot be computed.")
+    factors: list[str] = list(grounding_res.factors)
 
     # 2. Air draft clearance calculation
     overhead_limit = (
@@ -87,7 +65,6 @@ def calculate_navigational_metrics(
         if overhead_limit_m is not None
         else UNRESTRICTED_AIR_DRAFT_LIMIT
     )
-    # Default to 45.0m if vessel class not recognized in air drafts
     vessel_air_draft = VESSEL_BENCHMARK_AIR_DRAFTS.get(vessel_class.strip(), 45.0)
     air_draft_clearance = round(overhead_limit - vessel_air_draft, 1)
 
@@ -135,8 +112,8 @@ def calculate_navigational_metrics(
         detail = f"Safe navigational passage: UKC {ukc_margin_m:+.2f}m and air draft clearance {air_draft_clearance:+.1f}m."
 
     metrics = NavigationalMetrics(
-        underKeelClearanceM=ukc_margin_m,
-        channelDepthM=effective_channel_depth,
+        underKeelClearanceM=round(ukc_margin_m, 2),
+        channelDepthM=round(effective_channel_depth, 2),
         airDraftClearanceM=air_draft_clearance,
         pilotageAvailable=pilotage_available,
         tideHeightM=round(tide_height_m, 2),

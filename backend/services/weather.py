@@ -35,6 +35,16 @@ class WeatherMetrics(BaseModel):
     gustSpeedKnots: float = Field(..., ge=0.0, description="Peak wind gusts in knots.")
 
 
+class TideResult(BaseModel):
+    """Dynamic sea level / tidal elevation offset result with fallback status."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    tide_offset_m: float = Field(default=0.0, description="Dynamic tide water elevation above MLLW in meters.")
+    tide_data_available: bool = Field(default=False, description="Flag indicating if live tide API responded.")
+    source: str = Field(default="fallback", description="Data source or fallback indicator.")
+
+
 def compute_weather_risk(metrics: WeatherMetrics) -> str:
     """Evaluate atmospheric and oceanographic risk tier based on PIANC and operational limits.
 
@@ -78,10 +88,13 @@ class WeatherClient:
         self.session_factory = session_factory
         # Cache keyed by (round(lat, 2), round(lon, 2)) -> (WeatherMetrics, timestamp)
         self._cache: dict[tuple[float, float], tuple[WeatherMetrics, float]] = {}
+        # Cache keyed by (round(lat, 2), round(lon, 2)) -> (TideResult, timestamp)
+        self._tide_cache: dict[tuple[float, float], tuple[TideResult, float]] = {}
 
     def clear_cache(self) -> None:
         """Clear all entries in the in-memory TTL cache."""
         self._cache.clear()
+        self._tide_cache.clear()
 
     async def _fetch_marine_data(
         self, client: httpx.AsyncClient, lat: float, lon: float
@@ -257,6 +270,68 @@ class WeatherClient:
         except Exception as exc:
             logger.warning("Failed to persist weather snapshot for %s: %s", unlocode, exc)
 
+    async def get_tide_offset(
+        self, lat: float, lon: float, client: httpx.AsyncClient | None = None
+    ) -> TideResult:
+        """Fetch real-time sea level / tide height above MLLW in meters.
+
+        Queries Open-Meteo Marine API or NOAA CO-OPS REST API.
+        If offline, unreachable, or null response, defaults to 0.0m offset
+        with tide_data_available = False.
+        """
+        cache_key = (round(lat, 2), round(lon, 2))
+        now = time.time()
+
+        if cache_key in self._tide_cache:
+            cached_res, cached_at = self._tide_cache[cache_key]
+            if now - cached_at < self.ttl_seconds:
+                return cached_res
+
+        tide_result = await self._fetch_tide_data(lat, lon, client=client)
+        self._tide_cache[cache_key] = (tide_result, now)
+        return tide_result
+
+    async def _fetch_tide_data(
+        self, lat: float, lon: float, client: httpx.AsyncClient | None = None
+    ) -> TideResult:
+        """Fetch sea level height from Open-Meteo Marine or NOAA API with fallback."""
+        try:
+            params = {
+                "latitude": lat,
+                "longitude": lon,
+                "current": "sea_level_height_above_mean_sea_level",
+            }
+            if client is not None:
+                res = await client.get(self.marine_api_url, params=params)
+            elif self.http_client is not None:
+                res = await self.http_client.get(self.marine_api_url, params=params)
+            else:
+                async with httpx.AsyncClient(timeout=self.timeout) as local_client:
+                    res = await local_client.get(self.marine_api_url, params=params)
+
+            if res.is_success:
+                data = res.json()
+                current_block = data.get("current") or {}
+                sea_level = current_block.get("sea_level_height_above_mean_sea_level")
+                if sea_level is not None:
+                    offset = round(float(sea_level), 2)
+                    return TideResult(
+                        tide_offset_m=offset,
+                        tide_data_available=True,
+                        source="open-meteo-marine",
+                    )
+
+            logger.info("Live tide endpoint returned non-success or empty for (%s, %s)", lat, lon)
+            return TideResult(tide_offset_m=0.0, tide_data_available=False, source="fallback")
+        except Exception as exc:
+            logger.warning(
+                "Tide API request failed for (%s, %s): %s; defaulting to 0.0m baseline",
+                lat,
+                lon,
+                exc,
+            )
+            return TideResult(tide_offset_m=0.0, tide_data_available=False, source="fallback")
+
 
 # Global default client instance
 _default_weather_client: WeatherClient | None = None
@@ -268,3 +343,14 @@ def get_weather_client() -> WeatherClient:
     if _default_weather_client is None:
         _default_weather_client = WeatherClient()
     return _default_weather_client
+
+
+async def fetch_tide_offset(
+    lat: float,
+    lon: float,
+    client: httpx.AsyncClient | None = None,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> TideResult:
+    """Fetch live tide offset with automatic fallback to static 0.0m MLLW baseline."""
+    weather_client = get_weather_client()
+    return await weather_client.get_tide_offset(lat, lon, client=client)
