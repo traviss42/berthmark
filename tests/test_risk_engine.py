@@ -21,10 +21,12 @@ from backend.services.risk_engine import (
     VALID_VESSEL_CLASSES,
     VESSEL_CLASS_LABELS,
     assemble_risk_assessment,
+    calculate_port_risk,
     determine_composite_tier,
     evaluate_weather_risk,
     persist_risk_assessment,
 )
+from backend.services.weather import TideResult
 from backend.taxonomy.seed import seed_vessel_classes
 
 
@@ -448,3 +450,120 @@ async def test_atomic_rollback_on_persistence_error(test_db_session: AsyncSessio
     check_stmt = select(PortRiskSnapshot).where(PortRiskSnapshot.unlocode == "TESTB")
     check_res = await test_db_session.execute(check_stmt)
     assert check_res.scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
+async def test_calculate_port_risk_with_dynamic_tide_offset(test_db_session, monkeypatch):
+    """Verify calculate_port_risk fetches live tide offset and integrates into NavigationalMetrics."""
+    async def mock_fetch_tide(lat, lon, client=None, timeout=10.0):
+        return TideResult(tide_offset_m=0.85, tide_data_available=True, source="open-meteo-marine")
+
+    monkeypatch.setattr("backend.services.risk_engine.fetch_tide_offset", mock_fetch_tide)
+
+    port = Port(
+        unlocode="USLAX",
+        port_name="Port of Los Angeles",
+        country_code="US",
+        subdivision_code="US-CA",
+        latitude=33.74,
+        longitude=-118.27,
+        channel_depth_m=16.1,
+        cargo_pier_depth_m=15.0,
+        anchorage_depth_m=18.0,
+        is_depth_available=True,
+        reconciliation_method="EXACT_UNLOCODE",
+    )
+    test_db_session.add(port)
+    await test_db_session.flush()
+
+    assessment = await calculate_port_risk(
+        session=test_db_session,
+        port=port,
+        vessel_class="neoPanamax",
+        persist=False,
+    )
+
+    nav = assessment.metrics.navigational
+    assert nav.tideHeightM == 0.85
+    # Available depth = 16.1 + 0.85 = 16.95m
+    # Design draft = 15.2m, calm swell multiplier = 1.10 -> req = 16.72m
+    # UKC margin = 16.95 - 16.72 = +0.23m
+    assert nav.underKeelClearanceM == 0.23
+
+    nav_subrisk = assessment.subRisks.navigational
+    assert any("Dynamic tide offset: +0.85m (Available depth: 16.95m)" in f for f in nav_subrisk.factors)
+    # Since tide_data_available is True, no fallback message
+    assert not any("Live tide API unavailable" in f for f in nav_subrisk.factors)
+
+
+@pytest.mark.asyncio
+async def test_calculate_port_risk_tide_fallback_on_api_offline(test_db_session, monkeypatch):
+    """Verify calculate_port_risk defaults to 0.0m with warning when tide API is offline."""
+    async def mock_fetch_tide(lat, lon, client=None, timeout=10.0):
+        return TideResult(tide_offset_m=0.0, tide_data_available=False, source="fallback")
+
+    monkeypatch.setattr("backend.services.risk_engine.fetch_tide_offset", mock_fetch_tide)
+
+    port = Port(
+        unlocode="USLAX",
+        port_name="Port of Los Angeles",
+        country_code="US",
+        subdivision_code="US-CA",
+        latitude=33.74,
+        longitude=-118.27,
+        channel_depth_m=16.1,
+        cargo_pier_depth_m=15.0,
+        anchorage_depth_m=18.0,
+        is_depth_available=True,
+        reconciliation_method="EXACT_UNLOCODE",
+    )
+    test_db_session.add(port)
+    await test_db_session.flush()
+
+    assessment = await calculate_port_risk(
+        session=test_db_session,
+        port=port,
+        vessel_class="neoPanamax",
+        persist=False,
+    )
+
+    nav = assessment.metrics.navigational
+    assert nav.tideHeightM == 0.0
+    nav_subrisk = assessment.subRisks.navigational
+    assert any("Dynamic tide offset: +0.00m (Available depth: 16.10m)" in f for f in nav_subrisk.factors)
+    assert any("Live tide API unavailable; defaulted to static 0.0m MLLW baseline." in f for f in nav_subrisk.factors)
+
+
+@pytest.mark.asyncio
+async def test_calculate_port_risk_with_tide_override(test_db_session):
+    """Verify tide_offset_override overrides external tide fetch."""
+    port = Port(
+        unlocode="USLAX",
+        port_name="Port of Los Angeles",
+        country_code="US",
+        subdivision_code="US-CA",
+        latitude=33.74,
+        longitude=-118.27,
+        channel_depth_m=16.1,
+        cargo_pier_depth_m=15.0,
+        anchorage_depth_m=18.0,
+        is_depth_available=True,
+        reconciliation_method="EXACT_UNLOCODE",
+    )
+    test_db_session.add(port)
+    await test_db_session.flush()
+
+    assessment = await calculate_port_risk(
+        session=test_db_session,
+        port=port,
+        vessel_class="neoPanamax",
+        persist=False,
+        tide_offset_override=1.20,
+    )
+
+    nav = assessment.metrics.navigational
+    assert nav.tideHeightM == 1.20
+    # Available depth = 16.1 + 1.20 = 17.30m
+    # UKC margin = 17.30 - 16.72 = +0.58m
+    assert nav.underKeelClearanceM == 0.58
+

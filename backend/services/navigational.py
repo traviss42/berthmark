@@ -34,6 +34,7 @@ def calculate_navigational_metrics(
     tide_height_m: float = 0.0,
     overhead_limit_m: float | None = None,
     custom_draft_m: float | None = None,
+    tide_data_available: bool = True,
 ) -> tuple[NavigationalMetrics, SubRiskResult]:
     """Calculate dynamic navigational metrics and evaluate composite navigational sub-risk.
 
@@ -52,6 +53,7 @@ def calculate_navigational_metrics(
         wave_height_m=wave_height_m,
         tide_offset_m=tide_height_m,
         custom_draft_m=custom_draft_m,
+        tide_data_available=tide_data_available,
     )
     ukc_tier = grounding_res.tier
     ukc_margin_m = grounding_res.ukc_margin_m if grounding_res.ukc_margin_m is not None else 0.0

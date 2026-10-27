@@ -27,7 +27,7 @@ from backend.services.congestion import (
 )
 from backend.services.navigational import calculate_navigational_metrics
 from backend.services.port_metrics import assemble_port_metrics
-from backend.services.weather import compute_weather_risk
+from backend.services.weather import compute_weather_risk, fetch_tide_offset
 
 logger = logging.getLogger(__name__)
 
@@ -333,6 +333,8 @@ async def calculate_port_risk(
     user_id: uuid.UUID | None = None,
     timestamp: datetime | None = None,
     persist: bool = True,
+    tide_offset_override: float | None = None,
+    tide_data_available_override: bool | None = None,
 ) -> RiskAssessment:
     """Full end-to-end operational risk assessment pipeline for a single port and vessel class."""
     if vessel_class not in VALID_VESSEL_CLASSES:
@@ -391,12 +393,40 @@ async def calculate_port_risk(
     congestion_subrisk = SubRiskResult(**congestion_assessment.to_subrisk_result())
     congestion_metrics = CongestionMetrics(**congestion_assessment.to_congestion_metrics())
 
-    # 3. Navigational domain
+    # 3. Navigational domain (incorporating dynamic tide offset)
+    if tide_offset_override is not None:
+        tide_offset_m = float(tide_offset_override)
+        tide_data_available = (
+            tide_data_available_override
+            if tide_data_available_override is not None
+            else True
+        )
+    elif port.latitude is not None and port.longitude is not None:
+        try:
+            tide_res = await fetch_tide_offset(port.latitude, port.longitude)
+            tide_offset_m = tide_res.tide_offset_m
+            tide_data_available = tide_res.tide_data_available
+        except Exception as exc:
+            logger.warning(
+                "Tide offset fetch failed for port %s (%s, %s): %s; defaulting to 0.0m baseline",
+                port.unlocode,
+                port.latitude,
+                port.longitude,
+                exc,
+            )
+            tide_offset_m = 0.0
+            tide_data_available = False
+    else:
+        tide_offset_m = 0.0
+        tide_data_available = False
+
     nav_metrics, nav_subrisk = calculate_navigational_metrics(
         vessel_class=vessel_class,
         channel_depth_m=port.channel_depth_m,
         wave_height_m=weather_metrics.waveHeightM,
         wind_speed_knots=weather_metrics.windSpeedKnots,
+        tide_height_m=tide_offset_m,
+        tide_data_available=tide_data_available,
     )
 
     # 4. Assemble unified subrisks & metrics
@@ -612,11 +642,31 @@ async def calculate_bulk_risk(
         congestion_subrisk = SubRiskResult(**congestion_assessment.to_subrisk_result())
         congestion_metrics = CongestionMetrics(**congestion_assessment.to_congestion_metrics())
 
+        # Determine tide offset
+        if port.latitude is not None and port.longitude is not None:
+            try:
+                tide_res = await fetch_tide_offset(port.latitude, port.longitude)
+                tide_offset_m = tide_res.tide_offset_m
+                tide_data_available = tide_res.tide_data_available
+            except Exception as exc:
+                logger.warning(
+                    "Tide fetch failed for bulk port %s: %s; defaulting to 0.0m",
+                    port.unlocode,
+                    exc,
+                )
+                tide_offset_m = 0.0
+                tide_data_available = False
+        else:
+            tide_offset_m = 0.0
+            tide_data_available = False
+
         nav_metrics, nav_subrisk = calculate_navigational_metrics(
             vessel_class=vessel_class,
             channel_depth_m=port.channel_depth_m,
             wave_height_m=weather_metrics.waveHeightM,
             wind_speed_knots=weather_metrics.windSpeedKnots,
+            tide_height_m=tide_offset_m,
+            tide_data_available=tide_data_available,
         )
 
         sub_risks = SubRisksDict(
