@@ -5,6 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 from backend.schemas.metrics import PortMetrics, SubRiskResult
+from backend.schemas.recommendation import AlternativePortRecommendation
 
 RiskTier = Literal["low", "medium", "high"]
 
@@ -86,6 +87,10 @@ class RiskAssessment(BaseModel):
     compositeScore: float = Field(..., ge=0.0, le=100.0, description="Overall composite score (0-100).")
     subRisks: SubRisksDict
     metrics: PortMetrics
+    alternatives: list[AlternativePortRecommendation] = Field(
+        default_factory=list,
+        description="Recommended alternative diversion ports when composite risk is High or Critical.",
+    )
 
     @field_validator("timestamp", mode="before")
     @classmethod

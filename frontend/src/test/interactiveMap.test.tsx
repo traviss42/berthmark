@@ -311,6 +311,56 @@ describe('InteractiveMap Component', () => {
     fireEvent.click(zoomOutBtn);
     fireEvent.click(resetBtn);
   });
+
+  it('filters displayed port pins according to selected vesselClass', () => {
+    const portPanamax: Port = { ...mockPort1, id: 'port-panamax', vesselClass: 'panamax' };
+    const portVlcc: Port = { ...mockPort2, id: 'port-vlcc', vesselClass: 'vlcc' };
+    const portNeoPanamax: Port = { ...mockPort3, id: 'port-neopanamax', vesselClass: 'neoPanamax' };
+
+    const { rerender } = render(
+      <InteractiveMap
+        ports={[portPanamax, portVlcc, portNeoPanamax]}
+        assessments={new Map()}
+        vesselClass="neoPanamax"
+      />
+    );
+
+    // Only neoPanamax should be visible
+    expect(screen.getByTestId('map-pin-port-neopanamax')).toBeInTheDocument();
+    expect(screen.queryByTestId('map-pin-port-panamax')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('map-pin-port-vlcc')).not.toBeInTheDocument();
+    expect(screen.getByText('(1 of 3 ports)')).toBeInTheDocument();
+
+    // Rerender with 'vlcc'
+    rerender(
+      <InteractiveMap
+        ports={[portPanamax, portVlcc, portNeoPanamax]}
+        assessments={new Map()}
+        vesselClass="vlcc"
+      />
+    );
+
+    expect(screen.getByTestId('map-pin-port-vlcc')).toBeInTheDocument();
+    expect(screen.queryByTestId('map-pin-port-neopanamax')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('map-pin-port-panamax')).not.toBeInTheDocument();
+    expect(screen.getByText('(1 of 3 ports)')).toBeInTheDocument();
+  });
+
+  it('displays no-vessel-ports-alert banner when no ports match selected vesselClass', () => {
+    const portPanamax: Port = { ...mockPort1, id: 'port-panamax', vesselClass: 'panamax' };
+
+    render(
+      <InteractiveMap
+        ports={[portPanamax]}
+        assessments={new Map()}
+        vesselClass="capesize"
+      />
+    );
+
+    expect(screen.queryByTestId('map-pin-port-panamax')).not.toBeInTheDocument();
+    expect(screen.getByTestId('no-vessel-ports-alert')).toBeInTheDocument();
+    expect(screen.getByText('(0 of 1 ports)')).toBeInTheDocument();
+  });
 });
 
 describe('Dashboard Grid vs Map View Toggle in App', () => {

@@ -24,6 +24,7 @@ import {
   TIER_LABELS,
 } from '@/utils/riskDisplay';
 import { AlternativePortDiversion } from './AlternativePortDiversion';
+import { WORLD_MAP_PATH } from './worldMapData';
 
 export interface InteractiveMapProps {
   ports: Port[];
@@ -62,9 +63,26 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   const [startPan, setStartPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const mapContainerRef = useRef<HTMLDivElement>(null);
 
-  // Auto-center bounds when ports change
+  // Filter ports matching the selected vesselClass
+  const visiblePorts = useMemo(() => {
+    return ports.filter((port) => {
+      // If port has an explicit watched vesselClass, only show when selected vesselClass matches
+      if (port.vesselClass) {
+        return port.vesselClass === vesselClass;
+      }
+      // If assessment has vesselClass, only show when it matches
+      const assessment = assessments.get(port.id);
+      if (assessment?.vesselClass) {
+        return assessment.vesselClass === vesselClass;
+      }
+      return true;
+    });
+  }, [ports, assessments, vesselClass]);
+
+  // Auto-center bounds when visible ports change
   const recenter = useCallback(() => {
-    if (ports.length === 0) {
+    const targetPorts = visiblePorts.length > 0 ? visiblePorts : ports;
+    if (targetPorts.length === 0) {
       setZoom(1);
       setPan({ x: 0, y: 0 });
       return;
@@ -75,7 +93,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     let minY = MAP_HEIGHT;
     let maxY = 0;
 
-    ports.forEach((p) => {
+    targetPorts.forEach((p) => {
       const { x, y } = projectCoordinates(p.lat, p.lon);
       if (x < minX) minX = x;
       if (x > maxX) maxX = x;
@@ -99,7 +117,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
       x: (MAP_WIDTH / 2 - midX) * fitZoom,
       y: (MAP_HEIGHT / 2 - midY) * fitZoom,
     });
-  }, [ports]);
+  }, [visiblePorts, ports]);
 
   useEffect(() => {
     recenter();
@@ -142,8 +160,8 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
 
   // Selected port & assessment
   const selectedPort = useMemo(
-    () => ports.find((p) => p.id === selectedPortId) ?? null,
-    [ports, selectedPortId]
+    () => visiblePorts.find((p) => p.id === selectedPortId) ?? null,
+    [visiblePorts, selectedPortId]
   );
   const selectedAssessment = useMemo(
     () => (selectedPortId ? assessments.get(selectedPortId) ?? null : null),
@@ -196,24 +214,17 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             <line x1="750" y1="0" x2="750" y2={MAP_HEIGHT} />
           </g>
 
-          {/* Simplified Continental Outlines */}
-          <g fill="#1e293b" stroke="#334155" strokeWidth="0.5">
-            {/* North America */}
-            <path d="M 120 70 L 260 60 L 300 120 L 250 170 L 210 240 L 170 190 L 100 120 Z" />
-            {/* South America */}
-            <path d="M 230 260 L 320 280 L 310 380 L 260 450 L 230 350 Z" />
-            {/* Europe */}
-            <path d="M 460 70 L 560 60 L 570 140 L 490 160 L 450 110 Z" />
-            {/* Africa */}
-            <path d="M 460 170 L 580 180 L 570 330 L 510 400 L 470 290 Z" />
-            {/* Asia */}
-            <path d="M 570 60 L 880 70 L 860 210 L 710 270 L 610 210 Z" />
-            {/* Australia */}
-            <path d="M 760 320 L 870 310 L 880 400 L 780 410 Z" />
-          </g>
+          {/* Realistic High-Fidelity Global Coastlines (Natural Earth 110m) */}
+          <path
+            d={WORLD_MAP_PATH}
+            fill="#1e293b"
+            stroke="#334155"
+            strokeWidth="0.6"
+            className="transition-colors"
+          />
 
           {/* ── Port Markers ── */}
-          {ports.map((port) => {
+          {visiblePorts.map((port) => {
             const { x, y } = projectCoordinates(port.lat, port.lon);
             const assessment = assessments.get(port.id);
             const tier = assessment?.compositeTier ?? 'low';
@@ -348,7 +359,23 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
         <span className="font-semibold text-white">
           {formatVesselClass(vesselClass)}
         </span>
+        <span className="text-slate-400 text-[11px] font-mono">
+          ({visiblePorts.length} of {ports.length} ports)
+        </span>
       </div>
+
+      {/* ── Filtered Out Advisory Banner ── */}
+      {ports.length > 0 && visiblePorts.length === 0 && (
+        <div
+          data-testid="no-vessel-ports-alert"
+          className="absolute top-14 left-4 z-10 flex items-center gap-2 px-3 py-2 bg-slate-800/90 border border-amber-500/40 text-xs text-amber-200 rounded-lg shadow-md backdrop-blur-xs"
+        >
+          <Ship className="w-4 h-4 text-amber-400 shrink-0" />
+          <span>
+            No ports watched for <strong>{formatVesselClass(vesselClass)}</strong> (all {ports.length} monitored ports belong to other vessel classes).
+          </span>
+        </div>
+      )}
 
       {/* ── Direct On-Map Tooltip Popup (Drawer-Free) ── */}
       {selectedPort && (

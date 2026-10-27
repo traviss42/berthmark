@@ -567,3 +567,55 @@ async def test_calculate_port_risk_with_tide_override(test_db_session):
     # UKC margin = 17.30 - 16.72 = +0.58m
     assert nav.underKeelClearanceM == 0.58
 
+
+@pytest.mark.asyncio
+async def test_calculate_port_risk_generates_alternative_ports_on_high_risk(test_db_session):
+    """Verify calculate_port_risk generates AlternativePortRecommendations when risk is high."""
+    primary_port = Port(
+        unlocode="USLAX",
+        port_name="Port of Los Angeles",
+        country_code="US",
+        subdivision_code="US-CA",
+        latitude=33.74,
+        longitude=-118.27,
+        channel_depth_m=16.1,
+        cargo_pier_depth_m=15.0,
+        anchorage_depth_m=18.0,
+        is_depth_available=True,
+        reconciliation_method="EXACT_UNLOCODE",
+    )
+    # Add candidate alternative port with deeper channel (23.2m > 16.1m)
+    alt_port = Port(
+        unlocode="USLGB",
+        port_name="Port of Long Beach",
+        country_code="US",
+        subdivision_code="US-CA",
+        latitude=33.75,
+        longitude=-118.22,
+        channel_depth_m=23.2,
+        cargo_pier_depth_m=20.0,
+        anchorage_depth_m=22.0,
+        is_depth_available=True,
+        reconciliation_method="EXACT_UNLOCODE",
+    )
+    test_db_session.add_all([primary_port, alt_port])
+    await test_db_session.flush()
+
+    # VLCC vessel draft is 21.0m (req depth 23.10m).
+    # USLAX channel (16.1m) triggers critical grounding hazard -> overall HIGH risk.
+    assessment = await calculate_port_risk(
+        session=test_db_session,
+        port=primary_port,
+        vessel_class="vlcc",
+        persist=False,
+    )
+
+    assert assessment.compositeTier == "high"
+    assert len(assessment.alternatives) == 1
+    rec = assessment.alternatives[0]
+    assert rec.unlocode == "USLGB"
+    assert rec.channelDepthM == 23.2
+    assert rec.depthMarginM == 0.1  # 23.2 - 23.10
+    assert rec.riskTier in ("low", "medium")
+
+

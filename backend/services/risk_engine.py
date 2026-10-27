@@ -19,6 +19,7 @@ from backend.schemas.metrics import (
     SubRiskResult,
     WeatherMetrics,
 )
+from backend.schemas.recommendation import AlternativePortRecommendation
 from backend.schemas.risk import BulkRiskPortItem, RiskAssessment, RiskTier, SubRisksDict
 from backend.services.congestion import (
     assess_congestion_risk,
@@ -27,6 +28,7 @@ from backend.services.congestion import (
 )
 from backend.services.navigational import calculate_navigational_metrics
 from backend.services.port_metrics import assemble_port_metrics
+from backend.services.recommendation import recommend_alternative_ports
 from backend.services.weather import compute_weather_risk, fetch_tide_offset
 
 logger = logging.getLogger(__name__)
@@ -176,6 +178,7 @@ def assemble_risk_assessment(
     sub_risks: SubRisksDict,
     metrics: PortMetrics,
     timestamp: datetime | None = None,
+    alternatives: list[AlternativePortRecommendation] | None = None,
 ) -> RiskAssessment:
     """Pure assembly of RiskAssessment payload conforming to OpenAPI schema."""
     if vessel_class not in VALID_VESSEL_CLASSES:
@@ -202,6 +205,7 @@ def assemble_risk_assessment(
         compositeScore=composite_score,
         subRisks=sub_risks,
         metrics=metrics,
+        alternatives=alternatives or [],
     )
 
 
@@ -444,6 +448,21 @@ async def calculate_port_risk(
         timestamp=ts,
     )
 
+    # 5. Composite tier & Alternative port recommendations
+    composite_tier, composite_score = determine_composite_tier(sub_risks)
+    alternatives: list[AlternativePortRecommendation] = []
+    if composite_tier in ("high", "critical"):
+        try:
+            alternatives = await recommend_alternative_ports(
+                session=session,
+                primary_port=port,
+                vessel_class=vessel_class,
+                primary_risk_tier=composite_tier.upper(),
+                wave_height_m=weather_metrics.waveHeightM,
+            )
+        except Exception as exc:
+            logger.warning("Failed to evaluate alternative ports for %s: %s", port.unlocode, exc)
+
     assessment = assemble_risk_assessment(
         port_id=canonical_port_id,
         port_name=canonical_port_name,
@@ -451,6 +470,7 @@ async def calculate_port_risk(
         sub_risks=sub_risks,
         metrics=unified_metrics,
         timestamp=ts,
+        alternatives=alternatives,
     )
 
     # 6. Atomic persistence of snapshot & alerts
@@ -474,6 +494,7 @@ async def calculate_bulk_risk(
     items: list[BulkRiskPortItem],
     vessel_class: str,
     timestamp: datetime | None = None,
+    include_alternatives: bool = False,
 ) -> list[RiskAssessment]:
     """Concurrent, high-performance bulk risk evaluation with O(1) batched database queries."""
     if vessel_class not in VALID_VESSEL_CLASSES:
@@ -686,6 +707,20 @@ async def calculate_bulk_risk(
             timestamp=ts,
         )
 
+        composite_tier, _ = determine_composite_tier(sub_risks)
+        alternatives: list[AlternativePortRecommendation] = []
+        if include_alternatives and composite_tier in ("high", "critical"):
+            try:
+                alternatives = await recommend_alternative_ports(
+                    session=session,
+                    primary_port=port,
+                    vessel_class=vessel_class,
+                    primary_risk_tier=composite_tier.upper(),
+                    wave_height_m=weather_metrics.waveHeightM,
+                )
+            except Exception as exc:
+                logger.warning("Failed to evaluate alternative ports in bulk for %s: %s", port.unlocode, exc)
+
         return assemble_risk_assessment(
             port_id=canonical_port_id,
             port_name=canonical_port_name,
@@ -693,6 +728,7 @@ async def calculate_bulk_risk(
             sub_risks=sub_risks,
             metrics=unified_metrics,
             timestamp=ts,
+            alternatives=alternatives,
         )
 
     tasks = [evaluate_item(item, port) for item, port in resolved_pairs]
@@ -704,6 +740,7 @@ def snapshot_to_risk_assessment(
     snapshot: PortRiskSnapshot,
     port_id: str,
     port_name: str,
+    alternatives: list[AlternativePortRecommendation] | None = None,
 ) -> RiskAssessment:
     """Convert an existing PortRiskSnapshot record into a schema-compliant RiskAssessment object."""
     ts = snapshot.updated_at
@@ -788,6 +825,7 @@ def snapshot_to_risk_assessment(
         compositeScore=comp_score,
         subRisks=sub_risks,
         metrics=metrics,
+        alternatives=alternatives or [],
     )
 
 

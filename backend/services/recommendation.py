@@ -93,6 +93,21 @@ async def recommend_alternative_ports(
     res = await session.execute(stmt)
     candidates = list(res.scalars().all())
 
+    # Fallback: if subdivision produces no candidates or is empty, match within same country
+    if not candidates and primary_port.country_code:
+        fallback_stmt = (
+            select(Port)
+            .where(
+                Port.country_code == primary_port.country_code,
+                Port.unlocode != primary_port.unlocode,
+                Port.is_depth_available.is_(True),
+                Port.channel_depth_m.isnot(None),
+                Port.channel_depth_m >= h_req,
+            )
+        )
+        res_fallback = await session.execute(fallback_stmt)
+        candidates = list(res_fallback.scalars().all())
+
     if not candidates:
         return []
 

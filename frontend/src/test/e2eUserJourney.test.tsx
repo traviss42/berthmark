@@ -392,12 +392,20 @@ describe('Frontend End-to-End User Journey (Issue 24)', () => {
     const mapContainer = await screen.findByTestId('interactive-map-container');
     expect(mapContainer).toBeInTheDocument();
 
-    // SVG pins are rendered for tracked ports
-    const pins = screen.getAllByTestId(/^map-pin-/);
-    expect(pins.length).toBeGreaterThanOrEqual(3);
+    // Default vessel class is neoPanamax; Singapore is visible
+    expect(screen.getByTestId('map-pin-port-singapore')).toBeInTheDocument();
+
+    // Switch vessel class selector to VLCC to view VLCC-monitored ports (Rotterdam)
+    const vesselSelectorBtn = screen.getByRole('button', { name: /Neo-Panamax/i });
+    fireEvent.click(vesselSelectorBtn);
+    const vlccOption = screen.getByRole('button', { name: /^VLCC/i });
+    fireEvent.click(vlccOption);
+
+    // SVG pin is rendered for Rotterdam
+    const rtmPin = await screen.findByTestId('map-pin-port-rotterdam');
+    expect(rtmPin).toBeInTheDocument();
 
     // Click Rotterdam pin to trigger direct popup
-    const rtmPin = screen.getByTestId('map-pin-port-rotterdam');
     fireEvent.click(rtmPin);
 
     // Direct popup window renders on map
