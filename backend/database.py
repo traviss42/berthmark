@@ -6,6 +6,10 @@ import os
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from sqlalchemy import event, insert, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import (

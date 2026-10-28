@@ -420,6 +420,10 @@ async def calculate_port_risk(
                 underway_count = 0
                 is_initializing = False
 
+    if not is_initializing and anchored_count is not None and hist_avg is None:
+        hist_avg = float(anchored_count)
+        days_collected = 1
+
     congestion_assessment = assess_congestion_risk(
         anchored_count=anchored_count,
         hist_avg_anchored=hist_avg,
@@ -640,13 +644,16 @@ async def calculate_bulk_risk(
     hour_of_day = ts.hour
     baseline_stmt = select(PortTrafficBaseline).where(
         PortTrafficBaseline.unlocode.in_(locode_keys),
-        PortTrafficBaseline.day_of_week == day_of_week,
-        PortTrafficBaseline.hour_of_day == hour_of_day,
     )
     b_res = await session.execute(baseline_stmt)
-    baselines_by_locode: dict[str, PortTrafficBaseline] = {
-        b.unlocode.upper(): b for b in b_res.scalars().all()
-    }
+    all_baselines = b_res.scalars().all()
+    baselines_by_slot: dict[tuple[str, int, int], PortTrafficBaseline] = {}
+    baselines_by_locode: dict[str, PortTrafficBaseline] = {}
+    for b in all_baselines:
+        loc = b.unlocode.upper()
+        baselines_by_slot[(loc, b.day_of_week, b.hour_of_day)] = b
+        if loc not in baselines_by_locode:
+            baselines_by_locode[loc] = b
 
     # 5. Query snapshots in ONE batched query using selectinload eager loading
     snap_stmt = (
@@ -712,7 +719,7 @@ async def calculate_bulk_risk(
             hist_avg = round(sum(counts) / len(counts), 1) if counts else None
             days_collected = min(30, max(1, len(dates)))
         else:
-            baseline = baselines_by_locode.get(locode)
+            baseline = baselines_by_slot.get((locode, day_of_week, hour_of_day)) or baselines_by_locode.get(locode)
             hist_avg = round(baseline.avg_anchored_count, 1) if baseline else None
             days_collected = 30 if baseline else 0
 
@@ -739,6 +746,10 @@ async def calculate_bulk_risk(
                 anchored_count = int(hist_avg) if hist_avg is not None else 0
                 underway_count = 0
                 is_initializing = False
+
+        if not is_initializing and anchored_count is not None and hist_avg is None:
+            hist_avg = float(anchored_count)
+            days_collected = 1
 
         weather_metrics = WeatherMetrics(
             windSpeedKnots=snap.wind_speed_kts if snap and snap.wind_speed_kts is not None else 12.0,

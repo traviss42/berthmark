@@ -4,7 +4,12 @@ import asyncio
 from contextlib import asynccontextmanager
 import logging
 import os
+import sys
 import urllib.parse
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
@@ -22,12 +27,36 @@ logger = logging.getLogger("backend.main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan context: auto-initialize schema and seed database on boot."""
+    """Application lifespan context: auto-initialize schema, seed DB, and run AIS stream worker."""
     try:
         await auto_init_database()
     except Exception as exc:
         logger.error("Database auto-initialization error on boot: %s", exc)
+
+    worker_task: asyncio.Task | None = None
+    api_key = os.getenv("AISSTREAM_API_KEY", "").strip()
+    dummy_keys = {"", "your_aisstream_api_key_here", "none", "null", "undefined"}
+    if (
+        api_key
+        and api_key.lower() not in dummy_keys
+        and os.getenv("TESTING") != "true"
+        and "pytest" not in sys.modules
+    ):
+        try:
+            from backend.ais.stream_worker import run_worker
+            worker_task = asyncio.create_task(run_worker())
+            logger.info("AIS Stream worker task launched from app lifespan.")
+        except Exception as exc:
+            logger.warning("Could not launch AIS stream worker in lifespan: %s", exc)
+
     yield
+
+    if worker_task and not worker_task.done():
+        worker_task.cancel()
+        try:
+            await worker_task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(
@@ -102,15 +131,25 @@ async def check_redis_health() -> bool:
         parsed = urllib.parse.urlparse(cache_url)
         host = parsed.hostname or "localhost"
         port = parsed.port or 6379
-        reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, port), timeout=2.0
-        )
-        writer.write(b"PING\r\n")
-        await writer.drain()
-        reply = await asyncio.wait_for(reader.readline(), timeout=2.0)
-        writer.close()
-        await writer.wait_closed()
-        return reply.startswith(b"+PONG")
+        hosts_to_try = [host]
+        if host not in ("localhost", "127.0.0.1"):
+            hosts_to_try.append("localhost")
+
+        for h in hosts_to_try:
+            try:
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(h, port), timeout=2.0
+                )
+                writer.write(b"PING\r\n")
+                await writer.drain()
+                reply = await asyncio.wait_for(reader.readline(), timeout=2.0)
+                writer.close()
+                await writer.wait_closed()
+                if reply.startswith(b"+PONG"):
+                    return True
+            except Exception:
+                continue
+        return False
     except Exception:
         return False
 

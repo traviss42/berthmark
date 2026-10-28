@@ -5,6 +5,10 @@ import logging
 import os
 import signal
 from typing import Any
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from backend.database import get_session_factory
 from backend.services.ais import (
     AISStreamWorker,

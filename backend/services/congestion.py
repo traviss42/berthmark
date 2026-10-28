@@ -279,6 +279,17 @@ async def get_rolling_congestion_baseline(
     if slot_baseline:
         return round(float(slot_baseline.avg_anchored_count), 1), 30
 
+    # Fallback to any existing baseline for this port
+    stmt_any = (
+        select(PortTrafficBaseline)
+        .where(PortTrafficBaseline.unlocode == clean_locode)
+        .order_by(PortTrafficBaseline.updated_at.desc())
+        .limit(1)
+    )
+    any_baseline = (await session.execute(stmt_any)).scalar_one_or_none()
+    if any_baseline:
+        return round(float(any_baseline.avg_anchored_count), 1), 30
+
     return None, 0
 
 

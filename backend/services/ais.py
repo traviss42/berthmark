@@ -255,7 +255,7 @@ class AISStreamWorker:
         queue_maxsize: int = 10000,
     ) -> None:
         self.worker_id = worker_id
-        self.api_key = api_key or os.getenv("AISSTREAM_API_KEY", "").strip()
+        self.api_key = api_key if api_key is not None else os.getenv("AISSTREAM_API_KEY", "").strip()
         self.session_factory = session_factory or get_session_factory()
         self.window_seconds = window_seconds
         self.queue: asyncio.Queue[TrafficSnapshotUpdate] = asyncio.Queue(maxsize=queue_maxsize)

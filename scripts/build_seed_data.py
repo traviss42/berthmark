@@ -316,9 +316,9 @@ def build_ports_seed(
                 or (anc_depth is not None and anc_depth > 0.0)
             )
 
-            # Prefer UN/LOCODE coordinates; fallback to WPI coordinates
-            lat = u_port["latitude"] if u_port["latitude"] is not None else wpi_match["latitude"]
-            lon = u_port["longitude"] if u_port["longitude"] is not None else wpi_match["longitude"]
+            # Prefer WPI coordinates (physical harbor location); fallback to UN/LOCODE coordinates
+            lat = wpi_match["latitude"] if wpi_match.get("latitude") is not None else u_port["latitude"]
+            lon = wpi_match["longitude"] if wpi_match.get("longitude") is not None else u_port["longitude"]
 
             if lat is None or lon is None:
                 continue
