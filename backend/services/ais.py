@@ -148,13 +148,15 @@ class TrafficSnapshotUpdate:
     total_count: int
 
 
-def parse_ais_position_report(raw_data: str | dict[str, Any]) -> dict[str, Any] | None:
+def parse_ais_position_report(raw_data: str | bytes | bytearray | dict[str, Any]) -> dict[str, Any] | None:
     """Parse and validate incoming WebSocket message into normalized position report.
 
     Returns:
         Dict with keys {'mmsi', 'lat', 'lon', 'sog'} or None if invalid or non-position report.
     """
     try:
+        if isinstance(raw_data, (bytes, bytearray)):
+            raw_data = raw_data.decode("utf-8", errors="ignore")
         data = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
     except Exception:
         return None
@@ -260,18 +262,23 @@ class AISStreamWorker:
         self.ports: list[MonitoredPortInfo] = []
         self.trackers: dict[str, PortTrafficTracker] = {}
         self.stop_event = asyncio.Event()
+        self.ports_updated_event = asyncio.Event()
         self.is_connected = False
         self._consumer_task: asyncio.Task | None = None
         self._worker_task: asyncio.Task | None = None
 
     def set_monitored_ports(self, all_ports: list[MonitoredPortInfo]) -> None:
-        """Filter ports belonging to this worker's regional partition."""
-        self.ports = [p for p in all_ports if assign_regional_worker(p.lon) == self.worker_id]
+        """Filter ports belonging to this worker's regional partition (or all if worker_id=0)."""
+        if self.worker_id == 0:
+            self.ports = list(all_ports)
+        else:
+            self.ports = [p for p in all_ports if assign_regional_worker(p.lon) == self.worker_id]
         for p in self.ports:
             if p.unlocode not in self.trackers:
                 self.trackers[p.unlocode] = PortTrafficTracker(
                     unlocode=p.unlocode, window_seconds=self.window_seconds
                 )
+        self.ports_updated_event.set()
 
     def build_subscription_payload(self) -> dict[str, Any]:
         """Construct AISStream.io subscription message with bounding boxes for active ports."""
@@ -337,17 +344,25 @@ class AISStreamWorker:
                                 s.total_active_geofence_count = update.total_count
                                 s.updated_at = utc_now()
                         else:
-                            # Create new initial snapshot record
-                            new_snapshot = PortRiskSnapshot(
-                                snapshot_id=uuid.uuid4(),
-                                unlocode=update.unlocode,
-                                vessel_class_id="panamax",
-                                anchored_vessel_count=update.anchored_count,
-                                underway_vessel_count=update.underway_count,
-                                total_active_geofence_count=update.total_count,
-                                updated_at=utc_now(),
+                            # Query watched vessel classes for this port
+                            w_stmt = select(UserWatchlist.vessel_class_id).where(
+                                UserWatchlist.unlocode == update.unlocode
                             )
-                            session.add(new_snapshot)
+                            w_res = await session.execute(w_stmt)
+                            vessel_classes = set(w_res.scalars().all())
+                            vessel_classes.update({"panamax", "neoPanamax"})
+
+                            for vc in vessel_classes:
+                                new_snapshot = PortRiskSnapshot(
+                                    snapshot_id=uuid.uuid4(),
+                                    unlocode=update.unlocode,
+                                    vessel_class_id=vc,
+                                    anchored_vessel_count=update.anchored_count,
+                                    underway_vessel_count=update.underway_count,
+                                    total_active_geofence_count=update.total_count,
+                                    updated_at=utc_now(),
+                                )
+                                session.add(new_snapshot)
                         await session.commit()
 
                         # Accumulate real observation into rolling baseline
@@ -394,8 +409,17 @@ class AISStreamWorker:
                     await ws.send(json.dumps(subscription_payload))
 
                     while not self.stop_event.is_set():
+                        if self.ports_updated_event.is_set():
+                            self.ports_updated_event.clear()
+                            try:
+                                payload = self.build_subscription_payload()
+                                await ws.send(json.dumps(payload))
+                                logger.info("Worker %s updated AIS subscription for %d ports", self.worker_id, len(self.ports))
+                            except Exception as exc:
+                                logger.warning("Failed to send updated subscription: %s", exc)
+
                         try:
-                            msg = await asyncio.wait_for(ws.recv(), timeout=5.0)
+                            msg = await asyncio.wait_for(ws.recv(), timeout=2.0)
                             parsed = parse_ais_position_report(msg)
                             if parsed:
                                 self.process_incoming_report(parsed)

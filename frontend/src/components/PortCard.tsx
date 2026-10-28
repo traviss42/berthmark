@@ -45,12 +45,14 @@ export const PortCard: React.FC<PortCardProps> = ({
   const tierColor = TIER_COLORS[tier];
   const tierLabel = TIER_LABELS[tier];
 
-  // Cold start detection
-  const isColdStart =
-    Boolean((assessment as any)?.isColdStart) ||
+  // Cold start / Ping accumulation detection
+  const isInitializing =
     Boolean((assessment as any)?.isInitializing) ||
-    Boolean((assessment?.metrics?.congestion as any)?.isColdStart) ||
     Boolean((assessment?.metrics?.congestion as any)?.isInitializing) ||
+    (Boolean((assessment as any)?.isColdStart) &&
+      (assessment as any)?.isInitializing !== false &&
+      (assessment?.metrics?.congestion as any)?.isInitializing !== false &&
+      (assessment?.metrics?.congestion as any)?.baselineDaysCollected === undefined) ||
     !assessment?.metrics?.congestion;
 
   // Congestion / 4D traffic metrics
@@ -150,7 +152,7 @@ export const PortCard: React.FC<PortCardProps> = ({
               <Ship className="w-3.5 h-3.5 text-slate-400" />
               Live AIS Traffic
             </span>
-            {!isColdStart && (
+            {!isInitializing && (
               <span
                 data-testid="queue-variance"
                 className={`text-[11px] font-medium flex items-center gap-0.5 ${
@@ -173,7 +175,7 @@ export const PortCard: React.FC<PortCardProps> = ({
             )}
           </div>
 
-          {isColdStart ? (
+          {isInitializing ? (
             <div
               data-testid="cold-start-indicator"
               className="py-3 px-3 rounded-lg bg-blue-50 border border-blue-200 text-center animate-pulse"

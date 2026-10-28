@@ -74,26 +74,36 @@ async def run_worker() -> None:
                     )
                 )
 
-    workers = [
-        AISStreamWorker(worker_id=1, api_key=api_key, session_factory=session_factory),
-        AISStreamWorker(worker_id=2, api_key=api_key, session_factory=session_factory),
-        AISStreamWorker(worker_id=3, api_key=api_key, session_factory=session_factory),
-    ]
+    worker = AISStreamWorker(worker_id=0, api_key=api_key, session_factory=session_factory)
+    worker.set_monitored_ports(monitored_ports)
+    logger.info("AIS Stream Worker initialized with %d monitored ports", len(worker.ports))
+    await worker.start()
 
-    for w in workers:
-        w.set_monitored_ports(monitored_ports)
-        logger.info("Worker %d assigned %d ports", w.worker_id, len(w.ports))
-        await w.start()
+    async def poll_watchlist_updates():
+        while not stop_event.is_set():
+            await asyncio.sleep(15)
+            try:
+                latest = await get_active_monitored_ports(session_factory)
+                current_locodes = {p.unlocode for p in worker.ports}
+                latest_locodes = {p.unlocode for p in latest}
+                if latest_locodes != current_locodes:
+                    logger.info("Watchlist updated (%s ports). Updating stream subscription...", len(latest_locodes))
+                    worker.set_monitored_ports(latest)
+            except Exception as e:
+                logger.warning("Error checking watchlist updates: %s", e)
 
-    logger.info("All regional AIS stream workers started. Running until shutdown signal...")
+    poll_task = asyncio.create_task(poll_watchlist_updates())
+
+    logger.info("AIS stream worker running. Waiting for shutdown signal...")
     try:
         await stop_event.wait()
     except asyncio.CancelledError:
         pass
 
-    logger.info("Shutdown signal received. Stopping regional workers...")
-    await asyncio.gather(*(w.stop() for w in workers), return_exceptions=True)
-    logger.info("All regional AIS stream workers stopped cleanly.")
+    poll_task.cancel()
+    logger.info("Shutdown signal received. Stopping worker...")
+    await worker.stop()
+    logger.info("AIS stream worker stopped cleanly.")
 
 
 def main() -> None:

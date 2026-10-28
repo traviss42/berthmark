@@ -398,9 +398,27 @@ async def calculate_port_risk(
             underway_count = snap.underway_vessel_count
             is_initializing = False
         else:
-            anchored_count = None
-            underway_count = 0
-            is_initializing = True
+            w_stmt = select(func.min(UserWatchlist.created_at)).where(
+                UserWatchlist.unlocode == port.unlocode
+            )
+            w_res = await session.execute(w_stmt)
+            first_watched = w_res.scalar_one_or_none()
+            now_utc = ts if ts.tzinfo is not None else ts.replace(tzinfo=timezone.utc)
+            if first_watched is not None:
+                if first_watched.tzinfo is None:
+                    first_watched = first_watched.replace(tzinfo=timezone.utc)
+                age_minutes = (now_utc - first_watched).total_seconds() / 60.0
+            else:
+                age_minutes = 999.0
+
+            if age_minutes < 15.0:
+                anchored_count = None
+                underway_count = 0
+                is_initializing = True
+            else:
+                anchored_count = int(hist_avg) if hist_avg is not None else 0
+                underway_count = 0
+                is_initializing = False
 
     congestion_assessment = assess_congestion_risk(
         anchored_count=anchored_count,
@@ -639,17 +657,34 @@ async def calculate_bulk_risk(
         )
         .where(
             PortRiskSnapshot.unlocode.in_(locode_keys),
-            PortRiskSnapshot.vessel_class_id == vessel_class,
         )
         .order_by(PortRiskSnapshot.updated_at.desc())
     )
     s_res = await session.execute(snap_stmt)
+    snapshots_by_pair: dict[tuple[str, str], PortRiskSnapshot] = {}
     snapshots_by_locode: dict[str, PortRiskSnapshot] = {}
     for s in s_res.scalars().all():
+        pair_key = (s.unlocode.upper(), s.vessel_class_id)
+        if pair_key not in snapshots_by_pair:
+            snapshots_by_pair[pair_key] = s
         if s.unlocode.upper() not in snapshots_by_locode:
             snapshots_by_locode[s.unlocode.upper()] = s
 
-    # 5b. Query 30-day historical snapshots for rolling baseline refinement in ONE batched query
+    # 5b. Query subscription dates to determine if ports are past the initial 15-min accumulation window
+    watch_dates_stmt = (
+        select(
+            UserWatchlist.unlocode,
+            func.min(UserWatchlist.created_at).label("first_watched"),
+        )
+        .where(UserWatchlist.unlocode.in_(locode_keys))
+        .group_by(UserWatchlist.unlocode)
+    )
+    wd_res = await session.execute(watch_dates_stmt)
+    first_watched_by_locode: dict[str, datetime] = {
+        r[0].upper(): r[1] for r in wd_res.all() if r[1] is not None
+    }
+
+    # 5c. Query 30-day historical snapshots for rolling baseline refinement in ONE batched query
     cutoff_30d = ts - timedelta(days=30)
     history_stmt = (
         select(
@@ -681,15 +716,29 @@ async def calculate_bulk_risk(
             hist_avg = round(baseline.avg_anchored_count, 1) if baseline else None
             days_collected = 30 if baseline else 0
 
-        snap = snapshots_by_locode.get(locode)
+        snap = snapshots_by_pair.get((locode, vessel_class)) or snapshots_by_locode.get(locode)
         if snap:
             anchored_count = snap.anchored_vessel_count
             underway_count = snap.underway_vessel_count
             is_initializing = False
         else:
-            anchored_count = None
-            underway_count = 0
-            is_initializing = True
+            first_watched = first_watched_by_locode.get(locode)
+            now_utc = ts if ts.tzinfo is not None else ts.replace(tzinfo=timezone.utc)
+            if first_watched is not None:
+                if first_watched.tzinfo is None:
+                    first_watched = first_watched.replace(tzinfo=timezone.utc)
+                age_minutes = (now_utc - first_watched).total_seconds() / 60.0
+            else:
+                age_minutes = 999.0
+
+            if age_minutes < 15.0:
+                anchored_count = None
+                underway_count = 0
+                is_initializing = True
+            else:
+                anchored_count = int(hist_avg) if hist_avg is not None else 0
+                underway_count = 0
+                is_initializing = False
 
         weather_metrics = WeatherMetrics(
             windSpeedKnots=snap.wind_speed_kts if snap and snap.wind_speed_kts is not None else 12.0,

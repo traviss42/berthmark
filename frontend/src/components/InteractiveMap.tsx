@@ -793,8 +793,12 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                   )}
                 </div>
 
-                {Boolean((selectedAssessment as any).isColdStart) ||
-                Boolean((selectedAssessment as any).isInitializing) ||
+                {Boolean((selectedAssessment as any).isInitializing) ||
+                Boolean((selectedAssessment.metrics?.congestion as any)?.isInitializing) ||
+                (Boolean((selectedAssessment as any).isColdStart) &&
+                  (selectedAssessment as any).isInitializing !== false &&
+                  (selectedAssessment.metrics?.congestion as any)?.isInitializing !== false &&
+                  (selectedAssessment.metrics?.congestion as any)?.baselineDaysCollected === undefined) ||
                 !selectedAssessment.metrics?.congestion ? (
                   <div
                     data-testid="popup-cold-start"
