@@ -17,12 +17,22 @@ from backend.taxonomy.seed import seed_vessel_classes
 @pytest_asyncio.fixture
 async def bulk_test_db(monkeypatch):
     """Create in-memory SQLite database seeded with vessel taxonomy and 25 test ports."""
-    from backend.services.weather import TideResult
+    from backend.services.weather import TideResult, WeatherMetrics
 
     async def mock_fetch_tide(lat, lon, client=None, timeout=10.0):
         return TideResult(tide_offset_m=0.5, tide_data_available=True, source="mock-test")
 
+    async def mock_fetch_weather(lat, lon, unlocode=None, client=None, timeout=10.0):
+        return WeatherMetrics(
+            windSpeedKnots=10.0,
+            waveHeightM=0.5,
+            swellPeriodSec=5.0,
+            visibilityNm=10.0,
+            gustSpeedKnots=12.0,
+        )
+
     monkeypatch.setattr("backend.services.risk_engine.fetch_tide_offset", mock_fetch_tide)
+    monkeypatch.setattr("backend.services.risk_engine.fetch_weather_metrics", mock_fetch_weather)
 
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
 

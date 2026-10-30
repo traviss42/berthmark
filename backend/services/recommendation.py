@@ -88,6 +88,8 @@ async def recommend_alternative_ports(
             .where(
                 Port.subdivision_code == primary_port.subdivision_code,
                 Port.unlocode != primary_port.unlocode,
+                Port.latitude.isnot(None),
+                Port.longitude.isnot(None),
                 Port.is_depth_available.is_(True),
                 Port.channel_depth_m.isnot(None),
                 Port.channel_depth_m >= h_req,
@@ -105,6 +107,8 @@ async def recommend_alternative_ports(
             .where(
                 Port.country_code == primary_port.country_code,
                 Port.unlocode.not_in(existing_locodes),
+                Port.latitude.isnot(None),
+                Port.longitude.isnot(None),
                 Port.is_depth_available.is_(True),
                 Port.channel_depth_m.isnot(None),
                 Port.channel_depth_m >= h_req,
@@ -121,6 +125,8 @@ async def recommend_alternative_ports(
             select(Port)
             .where(
                 Port.unlocode.not_in(existing_locodes),
+                Port.latitude.isnot(None),
+                Port.longitude.isnot(None),
                 Port.is_depth_available.is_(True),
                 Port.channel_depth_m.isnot(None),
                 Port.channel_depth_m >= h_req,
@@ -152,12 +158,14 @@ async def recommend_alternative_ports(
 
     eligible: list[AlternativePortRecommendation] = []
     for cand in candidates:
+        if cand.latitude is None or cand.longitude is None:
+            continue
         snap = latest_snaps.get(cand.unlocode)
         cand_risk = (snap.overall_risk_level if snap and snap.overall_risk_level else "LOW").upper()
 
         # Step 4: Disqualify candidates operating at HIGH or CRITICAL risk
-        cand_wave = snap.swell_height_m if snap and snap.swell_height_m is not None else 0.8
-        cand_wind = snap.wind_speed_kts if snap and snap.wind_speed_kts is not None else 10.0
+        cand_wave = snap.swell_height_m if snap and snap.swell_height_m is not None else 0.0
+        cand_wind = snap.wind_speed_kts if snap and snap.wind_speed_kts is not None else 0.0
 
         if cand_risk in ("HIGH", "CRITICAL") or cand_wave > 2.5 or cand_wind > 30.0:
             continue
@@ -242,10 +250,12 @@ async def batch_recommend_alternative_ports(
     if not conditions:
         return {p.unlocode: [] for p, _ in high_risk_ports}
 
-    # 2. Single batched query for candidate ports meeting minimum depth
+    # 2. Single batched query for candidate ports meeting minimum depth and having valid coordinates
     cand_stmt = (
         select(Port)
         .where(
+            Port.latitude.isnot(None),
+            Port.longitude.isnot(None),
             Port.is_depth_available.is_(True),
             Port.channel_depth_m.isnot(None),
             Port.channel_depth_m >= min_h_req,
@@ -282,7 +292,7 @@ async def batch_recommend_alternative_ports(
         eligible: list[AlternativePortRecommendation] = []
 
         for cand in all_candidates:
-            if cand.unlocode == primary_port.unlocode:
+            if cand.unlocode == primary_port.unlocode or cand.latitude is None or cand.longitude is None:
                 continue
             depth = cand.channel_depth_m or 0.0
             if depth < port_h_req:
@@ -302,8 +312,8 @@ async def batch_recommend_alternative_ports(
 
             snap = latest_snaps.get(cand.unlocode)
             cand_risk = (snap.overall_risk_level if snap and snap.overall_risk_level else "LOW").upper()
-            cand_wave = snap.swell_height_m if snap and snap.swell_height_m is not None else 0.8
-            cand_wind = snap.wind_speed_kts if snap and snap.wind_speed_kts is not None else 10.0
+            cand_wave = snap.swell_height_m if snap and snap.swell_height_m is not None else 0.0
+            cand_wind = snap.wind_speed_kts if snap and snap.wind_speed_kts is not None else 0.0
 
             if cand_risk in ("HIGH", "CRITICAL") or cand_wave > 2.5 or cand_wind > 30.0:
                 continue

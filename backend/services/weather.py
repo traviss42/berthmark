@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend.database import get_session_factory
 from backend.models import PortRiskSnapshot, utc_now
+from backend.schemas.metrics import WeatherMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -21,18 +22,6 @@ MS_TO_KNOTS = 1.94384
 METERS_TO_NM = 1 / 1852.0
 DEFAULT_TIMEOUT = 10.0
 DEFAULT_CACHE_TTL = 900.0  # 15 minutes
-
-
-class WeatherMetrics(BaseModel):
-    """Normalized weather and marine metrics conforming to OpenAPI WeatherMetrics schema."""
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    windSpeedKnots: float = Field(..., ge=0.0, description="Sustained wind speed in knots.")
-    waveHeightM: float = Field(..., ge=0.0, description="Significant wave height in meters.")
-    swellPeriodSec: float = Field(..., ge=0.0, description="Primary wave/swell period in seconds.")
-    visibilityNm: float = Field(..., ge=0.0, description="Meteorological visibility in nautical miles.")
-    gustSpeedKnots: float = Field(..., ge=0.0, description="Peak wind gusts in knots.")
 
 
 class TideResult(BaseModel):
@@ -354,3 +343,33 @@ async def fetch_tide_offset(
     """Fetch live tide offset with automatic fallback to static 0.0m MLLW baseline."""
     weather_client = get_weather_client()
     return await weather_client.get_tide_offset(lat, lon, client=client)
+
+
+async def fetch_weather_metrics(
+    lat: float,
+    lon: float,
+    unlocode: str | None = None,
+    client: httpx.AsyncClient | None = None,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> WeatherMetrics:
+    """Fetch live marine and atmospheric weather metrics via WeatherClient."""
+    try:
+        weather_client = get_weather_client()
+        if client is not None:
+            temp_client = WeatherClient(http_client=client, ttl_seconds=weather_client.ttl_seconds, timeout=timeout)
+            return await temp_client.get_weather(lat, lon, unlocode=unlocode)
+        return await weather_client.get_weather(lat, lon, unlocode=unlocode)
+    except Exception as exc:
+        logger.warning(
+            "Weather API request failed for (%s, %s): %s; defaulting to 0.0m baseline",
+            lat,
+            lon,
+            exc,
+        )
+        return WeatherMetrics(
+            windSpeedKnots=0.0,
+            waveHeightM=0.0,
+            swellPeriodSec=0.0,
+            visibilityNm=10.0,
+            gustSpeedKnots=0.0,
+        )

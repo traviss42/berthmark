@@ -33,7 +33,11 @@ from backend.services.recommendation import (
     batch_recommend_alternative_ports,
     recommend_alternative_ports,
 )
-from backend.services.weather import compute_weather_risk, fetch_tide_offset
+from backend.services.weather import (
+    compute_weather_risk,
+    fetch_tide_offset,
+    fetch_weather_metrics,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -365,14 +369,33 @@ async def calculate_port_risk(
     # 1. Weather domain
     if weather_override is not None:
         weather_metrics = weather_override
+    elif port.latitude is not None and port.longitude is not None:
+        try:
+            weather_metrics = await fetch_weather_metrics(
+                port.latitude, port.longitude, unlocode=port.unlocode
+            )
+        except Exception as exc:
+            logger.warning(
+                "Dynamic weather fetch failed for port %s (%s, %s): %s",
+                port.unlocode,
+                port.latitude,
+                port.longitude,
+                exc,
+            )
+            weather_metrics = WeatherMetrics(
+                windSpeedKnots=0.0,
+                waveHeightM=0.0,
+                swellPeriodSec=0.0,
+                visibilityNm=10.0,
+                gustSpeedKnots=0.0,
+            )
     else:
-        # Default safe weather metrics for cold start / offline resilience
         weather_metrics = WeatherMetrics(
-            windSpeedKnots=12.0,
-            waveHeightM=0.8,
-            swellPeriodSec=6.0,
+            windSpeedKnots=0.0,
+            waveHeightM=0.0,
+            swellPeriodSec=0.0,
             visibilityNm=10.0,
-            gustSpeedKnots=15.0,
+            gustSpeedKnots=0.0,
         )
     weather_subrisk = evaluate_weather_risk(weather_metrics)
 
@@ -709,6 +732,48 @@ async def calculate_bulk_risk(
     for unlocode, count, updated_at in h_res.all():
         history_by_locode.setdefault(unlocode.upper(), []).append((count, updated_at))
 
+    # 5d. Resolve live weather metrics dynamically for all unique port coordinates
+    weather_by_locode: dict[str, WeatherMetrics] = {}
+
+    async def resolve_port_weather(p: Port):
+        loc = p.unlocode.upper()
+        snap = snapshots_by_pair.get((loc, vessel_class)) or snapshots_by_locode.get(loc)
+        now_utc = ts if ts.tzinfo is not None else ts.replace(tzinfo=timezone.utc)
+        snap_age_seconds = 999999.0
+        if snap and snap.updated_at:
+            s_up = snap.updated_at if snap.updated_at.tzinfo is not None else snap.updated_at.replace(tzinfo=timezone.utc)
+            snap_age_seconds = (now_utc - s_up).total_seconds()
+
+        # If snapshot already has fresh swell and wind (< 15 min old), use it
+        if snap and snap.swell_height_m is not None and snap.wind_speed_kts is not None and snap_age_seconds < 900.0:
+            weather_by_locode[loc] = WeatherMetrics(
+                windSpeedKnots=snap.wind_speed_kts,
+                waveHeightM=snap.swell_height_m,
+                swellPeriodSec=6.0,
+                visibilityNm=10.0,
+                gustSpeedKnots=round(snap.wind_speed_kts * 1.25, 1),
+            )
+            return
+
+        if p.latitude is not None and p.longitude is not None:
+            try:
+                wm = await fetch_weather_metrics(p.latitude, p.longitude, unlocode=p.unlocode)
+                weather_by_locode[loc] = wm
+                return
+            except Exception as exc:
+                logger.warning("Dynamic weather resolution failed for port %s: %s", loc, exc)
+
+        weather_by_locode[loc] = WeatherMetrics(
+            windSpeedKnots=0.0,
+            waveHeightM=0.0,
+            swellPeriodSec=0.0,
+            visibilityNm=10.0,
+            gustSpeedKnots=0.0,
+        )
+
+    unique_ports_for_weather = list({p.unlocode.upper(): p for _, p in resolved_pairs}.values())
+    await asyncio.gather(*(resolve_port_weather(p) for p in unique_ports_for_weather))
+
     # 6. Concurrently evaluate each resolved port in-memory
     async def evaluate_item(item: BulkRiskPortItem, port: Port) -> RiskAssessment:
         locode = port.unlocode.upper()
@@ -751,12 +816,15 @@ async def calculate_bulk_risk(
             hist_avg = float(anchored_count)
             days_collected = 1
 
-        weather_metrics = WeatherMetrics(
-            windSpeedKnots=snap.wind_speed_kts if snap and snap.wind_speed_kts is not None else 12.0,
-            waveHeightM=snap.swell_height_m if snap and snap.swell_height_m is not None else 0.8,
-            swellPeriodSec=6.0,
-            visibilityNm=10.0,
-            gustSpeedKnots=15.0,
+        weather_metrics = weather_by_locode.get(
+            locode,
+            WeatherMetrics(
+                windSpeedKnots=0.0,
+                waveHeightM=0.0,
+                swellPeriodSec=0.0,
+                visibilityNm=10.0,
+                gustSpeedKnots=0.0,
+            ),
         )
         weather_subrisk = evaluate_weather_risk(weather_metrics)
 
@@ -918,11 +986,11 @@ def snapshot_to_risk_assessment(
             isInitializing=False,
         ),
         weather=WeatherMetrics(
-            windSpeedKnots=snapshot.wind_speed_kts or 10.0,
-            waveHeightM=snapshot.swell_height_m or 0.8,
+            windSpeedKnots=snapshot.wind_speed_kts or 0.0,
+            waveHeightM=snapshot.swell_height_m or 0.0,
             swellPeriodSec=6.0,
             visibilityNm=10.0,
-            gustSpeedKnots=(snapshot.wind_speed_kts or 10.0) * 1.3,
+            gustSpeedKnots=(snapshot.wind_speed_kts or 0.0) * 1.3,
         ),
         navigational=NavigationalMetrics(
             underKeelClearanceM=2.5 if nav_tier == "low" else (0.5 if nav_tier == "medium" else -0.5),

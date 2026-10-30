@@ -191,7 +191,15 @@ async def search_ports(
     else:
         filters.append(func.lower(Port.country_code) == clean_q)
 
-    stmt = select(Port).where(or_(*filters)).limit(limit)
+    stmt = (
+        select(Port)
+        .where(
+            Port.latitude.isnot(None),
+            Port.longitude.isnot(None),
+            or_(*filters),
+        )
+        .limit(limit)
+    )
     result = await session.execute(stmt)
     records = result.scalars().all()
 
