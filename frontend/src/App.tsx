@@ -12,7 +12,8 @@ import {
   Map as MapIcon,
   Loader2,
 } from 'lucide-react';
-import type { VesselClass } from '@/types';
+import type { VesselClass, RiskAssessment } from '@/types';
+import { getServices } from '@/services';
 import { usePorts, useRiskAssessments, useNotifications } from '@/hooks/useServices';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { LoginForm } from '@/components/LoginForm';
@@ -175,6 +176,8 @@ function Dashboard({ onNavigate }: DashboardProps) {
   const [viewMode, setViewMode] = useState<'grid' | 'map'>('grid');
   const [vesselClass, setVesselClass] = useState<VesselClass>('neoPanamax');
   const [selectedPortId, setSelectedPortId] = useState<string | null>(null);
+  const [customDetailAssessment, setCustomDetailAssessment] = useState<RiskAssessment | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -195,9 +198,9 @@ function Dashboard({ onNavigate }: DashboardProps) {
     [ports, selectedPortId]
   );
 
-  const selectedAssessment = useMemo(
-    () => (selectedPortId ? assessmentMap.get(selectedPortId) ?? null : null),
-    [assessmentMap, selectedPortId]
+  const activeAssessment = useMemo(
+    () => (selectedPortId ? assessmentMap.get(selectedPortId) || customDetailAssessment : null),
+    [assessmentMap, selectedPortId, customDetailAssessment]
   );
 
   const summary = useMemo(() => {
@@ -216,25 +219,54 @@ function Dashboard({ onNavigate }: DashboardProps) {
     }
   }, [refreshRisk]);
 
-  const handleSelectPort = useCallback((portId: string) => {
-    setSelectedPortId(portId);
-  }, []);
+  const handleSelectPort = useCallback(
+    async (portId: string) => {
+      setSelectedPortId(portId);
+      const existing = assessmentMap.get(portId);
+      if (existing) {
+        setCustomDetailAssessment(null);
+        return;
+      }
+      setDetailLoading(true);
+      try {
+        const assessment = await getServices().risk.getRiskAssessment(portId, '', vesselClass);
+        setCustomDetailAssessment(assessment);
+      } catch (err) {
+        console.error('Failed to load risk assessment for port', portId, err);
+      } finally {
+        setDetailLoading(false);
+      }
+    },
+    [assessmentMap, vesselClass]
+  );
 
   const handleRefreshDetail = useCallback(async () => {
-    if (!selectedPort) return;
+    if (!selectedPortId) return;
     setRefreshing(true);
     try {
-      await refreshRisk();
+      if (selectedPort) {
+        await refreshRisk();
+      } else {
+        const assessment = await getServices().risk.getRiskAssessment(selectedPortId, '', vesselClass);
+        setCustomDetailAssessment(assessment);
+      }
     } finally {
       setRefreshing(false);
     }
-  }, [refreshRisk, selectedPort]);
+  }, [refreshRisk, selectedPort, selectedPortId, vesselClass]);
 
-  const handleRemovePort = useCallback(async () => {
-    if (!selectedPortId) return;
-    await removePort(selectedPortId);
-    setSelectedPortId(null);
-  }, [removePort, selectedPortId]);
+  const handleRemovePort = useCallback(
+    async (portId?: string) => {
+      const targetId = portId || selectedPortId;
+      if (!targetId) return;
+      await removePort(targetId);
+      if (selectedPortId === targetId) {
+        setSelectedPortId(null);
+        setCustomDetailAssessment(null);
+      }
+    },
+    [removePort, selectedPortId]
+  );
 
   // Close notification panel on Escape key
   useEffect(() => {
@@ -342,14 +374,23 @@ function Dashboard({ onNavigate }: DashboardProps) {
 
       {/* Main content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {selectedAssessment && selectedPort && viewMode !== 'map' ? (
+        {detailLoading ? (
+          <div data-testid="detail-loading-state" className="flex flex-col items-center justify-center py-24 text-slate-500">
+            <Loader2 className="w-8 h-8 animate-spin text-blue-600 mb-3" />
+            <span className="text-sm font-medium">Loading port risk summary...</span>
+          </div>
+        ) : activeAssessment && viewMode !== 'map' ? (
           <PortRiskDetail
-            assessment={selectedAssessment}
-            onBack={() => setSelectedPortId(null)}
-            onRemove={handleRemovePort}
-            canRemove={true}
+            assessment={activeAssessment}
+            onBack={() => {
+              setSelectedPortId(null);
+              setCustomDetailAssessment(null);
+            }}
+            onRemove={selectedPort ? () => handleRemovePort(selectedPort.id) : undefined}
+            canRemove={Boolean(selectedPort)}
             onRefresh={handleRefreshDetail}
             refreshing={refreshing}
+            onSelectAlternative={handleSelectPort}
           />
         ) : (
           <div className="space-y-6">
@@ -456,6 +497,10 @@ function Dashboard({ onNavigate }: DashboardProps) {
                   assessments={assessmentMap}
                   vesselClass={vesselClass}
                   onSelectPort={handleSelectPort}
+                  onViewPortDetail={(portId) => {
+                    setViewMode('grid');
+                    handleSelectPort(portId);
+                  }}
                   onAddFirstPort={() => {
                     const input = document.getElementById('port-search-input');
                     input?.focus();
@@ -467,6 +512,7 @@ function Dashboard({ onNavigate }: DashboardProps) {
                   ports={ports}
                   assessments={assessmentMap}
                   onSelectPort={handleSelectPort}
+                  onRemovePort={handleRemovePort}
                   loading={portsLoading || riskLoading}
                   selectedVesselClass={vesselClass}
                   onAddFirstPort={() => {

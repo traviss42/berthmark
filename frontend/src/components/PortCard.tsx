@@ -11,6 +11,7 @@ import {
   TrendingUp,
   TrendingDown,
   Minus,
+  Trash2,
 } from 'lucide-react';
 import type { Port, RiskAssessment, VesselClass } from '@/types';
 import {
@@ -26,6 +27,8 @@ export interface PortCardProps {
   assessment?: RiskAssessment | null;
   vesselClass?: VesselClass;
   onSelect?: (portId: string) => void;
+  onRemove?: (portId: string) => void;
+  onSelectAlternative?: (portId: string) => void;
   className?: string;
 }
 
@@ -34,6 +37,8 @@ export const PortCard: React.FC<PortCardProps> = ({
   assessment,
   vesselClass = 'neoPanamax',
   onSelect,
+  onRemove,
+  onSelectAlternative,
   className = '',
 }) => {
   const effectiveVesselClass = assessment?.vesselClass || port.vesselClass || vesselClass;
@@ -118,15 +123,32 @@ export const PortCard: React.FC<PortCardProps> = ({
           </div>
 
           <div className="flex flex-col items-end gap-1.5 shrink-0">
-            {/* Overall Risk Badge */}
-            <div
-              data-testid="risk-badge"
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border ${tierColor.bg} ${tierColor.text} ${tierColor.border} shadow-2xs`}
-            >
-              <span className={`w-2 h-2 rounded-full ${tierColor.dot}`} />
-              <span>
-                {tierLabel.toUpperCase()} · {Math.round(score)}
-              </span>
+            <div className="flex items-center gap-1.5">
+              {onRemove && (
+                <button
+                  type="button"
+                  data-testid={`remove-port-${port.id}`}
+                  title={`Remove ${port.name} from dashboard`}
+                  aria-label={`Remove ${port.name}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemove(port.id);
+                  }}
+                  className="p-1 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+              {/* Overall Risk Badge */}
+              <div
+                data-testid="risk-badge"
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border ${tierColor.bg} ${tierColor.text} ${tierColor.border} shadow-2xs`}
+              >
+                <span className={`w-2 h-2 rounded-full ${tierColor.dot}`} />
+                <span>
+                  {tierLabel.toUpperCase()} · {Math.round(score)}
+                </span>
+              </div>
             </div>
 
             {/* Vessel Class Badge */}
@@ -298,6 +320,7 @@ export const PortCard: React.FC<PortCardProps> = ({
         <AlternativePortDiversion
           compositeTier={tier}
           alternatives={assessment?.alternatives}
+          onSelectAlternative={onSelectAlternative || onSelect}
         />
       </div>
 

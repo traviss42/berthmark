@@ -11,6 +11,7 @@ interface Props {
   loading: boolean;
   onAddFirstPort?: () => void;
   selectedVesselClass?: VesselClass;
+  onRemovePort?: (portId: string) => void;
 }
 
 export function PortList({
@@ -20,6 +21,7 @@ export function PortList({
   loading,
   onAddFirstPort,
   selectedVesselClass = 'neoPanamax',
+  onRemovePort,
 }: Props) {
   // Group ports by assigned vessel class
   const groupedPorts = useMemo(() => {
@@ -117,6 +119,8 @@ export function PortList({
                 assessment={assessment}
                 vesselClass={vc as VesselClass}
                 onSelect={onSelectPort}
+                onRemove={onRemovePort}
+                onSelectAlternative={onSelectPort}
               />
             ))}
           </div>

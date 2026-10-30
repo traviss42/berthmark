@@ -242,6 +242,62 @@ describe('PortCard Component', () => {
       'Initializing Live Traffic (Collecting AIS Pings)...'
     );
   });
+
+  it('calls onRemove with port ID and does not trigger onSelect when trash button is clicked', () => {
+    const onSelect = vi.fn();
+    const onRemove = vi.fn();
+    render(
+      <PortCard
+        port={mockPortRotterdam}
+        assessment={mockAssessmentLow}
+        onSelect={onSelect}
+        onRemove={onRemove}
+      />
+    );
+
+    const removeBtn = screen.getByTestId('remove-port-port-rotterdam');
+    expect(removeBtn).toBeInTheDocument();
+    fireEvent.click(removeBtn);
+
+    expect(onRemove).toHaveBeenCalledWith('port-rotterdam');
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('calls onSelectAlternative with candidate portId when an alternative port candidate is clicked', () => {
+    const onSelectAlternative = vi.fn();
+    const highWithAlternatives: RiskAssessment = {
+      ...mockAssessmentLow,
+      compositeTier: 'high',
+      compositeScore: 85,
+      alternatives: [
+        {
+          portId: 'port-antwerp',
+          unlocode: 'BEANR',
+          portName: 'Port of Antwerp',
+          country: 'Belgium',
+          distanceNm: 45.2,
+          channelDepthM: 18.0,
+          depthMarginM: 2.5,
+          swellHeightM: 0.8,
+          riskTier: 'low',
+        },
+      ],
+    };
+
+    render(
+      <PortCard
+        port={mockPortRotterdam}
+        assessment={highWithAlternatives}
+        onSelectAlternative={onSelectAlternative}
+      />
+    );
+
+    const altCandidate = screen.getByTestId('alternative-candidate-port-antwerp');
+    expect(altCandidate).toBeInTheDocument();
+    fireEvent.click(altCandidate);
+
+    expect(onSelectAlternative).toHaveBeenCalledWith('port-antwerp');
+  });
 });
 
 describe('PortList Component and Grid Grouping', () => {
@@ -320,6 +376,67 @@ describe('PortList Component and Grid Grouping', () => {
 
     expect(screen.getByTestId('port-card-sub-1')).toBeInTheDocument();
     expect(screen.getByTestId('port-card-sub-2')).toBeInTheDocument();
+  });
+
+  it('propagates onRemovePort when remove button is clicked on any card in the list', () => {
+    const onRemovePort = vi.fn();
+    const assessments = new Map<string, RiskAssessment>();
+    assessments.set(mockPortRotterdam.id, mockAssessmentLow);
+
+    render(
+      <PortList
+        ports={[mockPortRotterdam]}
+        assessments={assessments}
+        onSelectPort={vi.fn()}
+        onRemovePort={onRemovePort}
+        loading={false}
+      />
+    );
+
+    const removeBtn = screen.getByTestId('remove-port-port-rotterdam');
+    expect(removeBtn).toBeInTheDocument();
+    fireEvent.click(removeBtn);
+
+    expect(onRemovePort).toHaveBeenCalledWith('port-rotterdam');
+  });
+
+  it('passes onSelectAlternative to cards so clicking alternative port triggers port selection', () => {
+    const onSelectPort = vi.fn();
+    const highWithAlternatives: RiskAssessment = {
+      ...mockAssessmentLow,
+      compositeTier: 'high',
+      compositeScore: 88,
+      alternatives: [
+        {
+          portId: 'port-antwerp',
+          unlocode: 'BEANR',
+          portName: 'Port of Antwerp',
+          country: 'Belgium',
+          distanceNm: 45.2,
+          channelDepthM: 18.0,
+          depthMarginM: 2.5,
+          swellHeightM: 0.8,
+          riskTier: 'low',
+        },
+      ],
+    };
+    const assessments = new Map<string, RiskAssessment>();
+    assessments.set(mockPortRotterdam.id, highWithAlternatives);
+
+    render(
+      <PortList
+        ports={[mockPortRotterdam]}
+        assessments={assessments}
+        onSelectPort={onSelectPort}
+        loading={false}
+      />
+    );
+
+    const altCandidate = screen.getByTestId('alternative-candidate-port-antwerp');
+    expect(altCandidate).toBeInTheDocument();
+    fireEvent.click(altCandidate);
+
+    expect(onSelectPort).toHaveBeenCalledWith('port-antwerp');
   });
 });
 

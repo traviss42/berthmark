@@ -239,6 +239,53 @@ describe('Frontend End-to-End User Journey (Issue 24)', () => {
         },
         alternatives: [],
       },
+      'port-wilhelmshaven': {
+        id: 'risk-wilhelmshaven',
+        portId: 'port-wilhelmshaven',
+        portName: 'Port of Wilhelmshaven',
+        vesselClass: 'vlcc',
+        vesselClassLabel: 'VLCC',
+        timestamp: new Date().toISOString(),
+        compositeTier: 'low',
+        compositeScore: 20.0,
+        subRisks: {
+          congestion: { category: 'congestion', tier: 'low', score: 20.0, detail: 'Normal', factors: [] },
+          weather: { category: 'weather', tier: 'low', score: 20.0, detail: 'Calm', factors: [] },
+          navigational: { category: 'navigational', tier: 'low', score: 20.0, detail: 'Deep channel', factors: [] },
+        },
+        metrics: {
+          portId: 'port-wilhelmshaven',
+          timestamp: new Date().toISOString(),
+          congestion: {
+            anchorageQueueCount: 2,
+            avgWaitingTimeHours: 3.0,
+            berthOccupancyPct: 40.0,
+            rolling30dAvgQueue: 3.0,
+            rolling30dAvgWaitHours: 4.0,
+          },
+          terminal: {
+            berthTurnaroundHours: 14.0,
+            berthToAnchorageWaitRatio: 0.6,
+            dwellTimeAnomalyScore: 3,
+            rolling30dAvgTurnaround: 16.0,
+          },
+          weather: {
+            windSpeedKnots: 9.0,
+            waveHeightM: 0.8,
+            swellPeriodSec: 6.0,
+            visibilityNm: 10.0,
+            gustSpeedKnots: 11.0,
+          },
+          navigational: {
+            underKeelClearanceM: 3.5,
+            channelDepthM: 20.0,
+            airDraftClearanceM: 55.0,
+            pilotageAvailable: true,
+            tideHeightM: 1.5,
+          },
+        },
+        alternatives: [],
+      },
     };
 
     const mockPortsService: IPortService = {
@@ -440,5 +487,39 @@ describe('Frontend End-to-End User Journey (Issue 24)', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('notification-badge')).not.toBeInTheDocument();
     });
+  });
+
+  it('allows directly removing a port card from the main page grid via the card trash icon', async () => {
+    render(<App />);
+
+    // Wait for cards to appear
+    await screen.findByText('Port of Singapore');
+    const removeBtn = await screen.findByTestId('remove-port-port-singapore');
+    expect(removeBtn).toBeInTheDocument();
+
+    // Click trash button on card
+    fireEvent.click(removeBtn);
+
+    // Verify port is removed from the dashboard without navigating to details
+    await waitFor(() => {
+      expect(screen.queryByTestId('port-card-port-singapore')).not.toBeInTheDocument();
+    });
+  });
+
+  it('clicking an alternative port recommendation card brings up its full summary', async () => {
+    render(<App />);
+
+    // Wait for Rotterdam card with Wilhelmshaven alternative
+    const altCandidate = await screen.findByTestId('alternative-candidate-port-wilhelmshaven');
+    expect(altCandidate).toBeInTheDocument();
+
+    // Click on the alternative candidate card
+    fireEvent.click(altCandidate);
+
+    // Verify full summary (PortRiskDetail) opens for Port of Wilhelmshaven
+    expect(await screen.findByRole('heading', { level: 2, name: 'Port of Wilhelmshaven' })).toBeInTheDocument();
+    expect(screen.getByText(/Weakest-Link Rule/i)).toBeInTheDocument();
+    expect(screen.getByText('Sub-Risk Assessment')).toBeInTheDocument();
+    expect(screen.getByText('Live Metrics')).toBeInTheDocument();
   });
 });

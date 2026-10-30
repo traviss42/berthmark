@@ -12,9 +12,18 @@ interface Props {
   canRemove: boolean;
   onRefresh: () => void;
   refreshing: boolean;
+  onSelectAlternative?: (portId: string) => void;
 }
 
-export function PortRiskDetail({ assessment, onBack, onRemove, canRemove, onRefresh, refreshing }: Props) {
+export function PortRiskDetail({
+  assessment,
+  onBack,
+  onRemove,
+  canRemove,
+  onRefresh,
+  refreshing,
+  onSelectAlternative,
+}: Props) {
   const m = assessment.metrics;
   const compositeColors = TIER_COLORS[assessment.compositeTier];
 
@@ -85,6 +94,7 @@ export function PortRiskDetail({ assessment, onBack, onRemove, canRemove, onRefr
       <AlternativePortDiversion
         compositeTier={assessment.compositeTier}
         alternatives={assessment.alternatives}
+        onSelectAlternative={onSelectAlternative}
       />
 
       {/* Sub-Risk Breakdown */}

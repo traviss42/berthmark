@@ -17,6 +17,7 @@ import {
   AlertTriangle,
   Check,
   Crosshair,
+  Eye,
 } from 'lucide-react';
 import type { Port, RiskAssessment, VesselClass, AlternativePortRecommendation } from '@/types';
 import {
@@ -33,6 +34,7 @@ export interface InteractiveMapProps {
   assessments: Map<string, RiskAssessment>;
   vesselClass: VesselClass;
   onSelectPort?: (portId: string) => void;
+  onViewPortDetail?: (portId: string) => void;
   onAddFirstPort?: () => void;
   onAddPort?: (port: Omit<Port, 'id' | 'isDefault' | 'addedByUserId'>) => Promise<any> | void;
   className?: string;
@@ -58,6 +60,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   assessments,
   vesselClass,
   onSelectPort,
+  onViewPortDetail,
   onAddFirstPort,
   onAddPort,
   className = '',
@@ -1137,6 +1140,25 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
               </button>
             </div>
           )}
+
+          {/* View Full Risk Summary Action */}
+          <div className="pt-2 border-t border-slate-100">
+            <button
+              type="button"
+              data-testid="alt-popup-view-summary"
+              onClick={() => {
+                if (onViewPortDetail) {
+                  onViewPortDetail(selectedAlternative.alternative.portId);
+                } else if (onSelectPort) {
+                  onSelectPort(selectedAlternative.alternative.portId);
+                }
+              }}
+              className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+            >
+              <Eye className="w-3.5 h-3.5 text-slate-500" />
+              <span>View Full Risk Summary</span>
+            </button>
+          </div>
         </div>
       )}
     </div>
