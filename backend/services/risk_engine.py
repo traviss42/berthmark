@@ -737,7 +737,8 @@ async def calculate_bulk_risk(
 
     async def resolve_port_weather(p: Port):
         loc = p.unlocode.upper()
-        snap = snapshots_by_pair.get((loc, vessel_class)) or snapshots_by_locode.get(loc)
+        # Traffic and weather in the port are port-wide physical realities; use the latest port observation
+        snap = snapshots_by_locode.get(loc) or snapshots_by_pair.get((loc, vessel_class))
         now_utc = ts if ts.tzinfo is not None else ts.replace(tzinfo=timezone.utc)
         snap_age_seconds = 999999.0
         if snap and snap.updated_at:
@@ -788,7 +789,8 @@ async def calculate_bulk_risk(
             hist_avg = round(baseline.avg_anchored_count, 1) if baseline else None
             days_collected = 30 if baseline else 0
 
-        snap = snapshots_by_pair.get((locode, vessel_class)) or snapshots_by_locode.get(locode)
+        # Port traffic (anchored, underway, total active) is port-wide; all vessel classes share the same anchorage and harbor
+        snap = snapshots_by_locode.get(locode) or snapshots_by_pair.get((locode, vessel_class))
         if snap:
             anchored_count = snap.anchored_vessel_count
             underway_count = snap.underway_vessel_count
