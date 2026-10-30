@@ -319,7 +319,7 @@ class AISStreamWorker:
                             logger.warning("AIS update queue full for worker %s", self.worker_id)
 
     async def _db_consumer_loop(self) -> None:
-        """Background loop dequeuing traffic updates and writing to port_risk_snapshots."""
+        """Background loop dequeuing traffic updates and writing to port_risk_snapshots in batched transactions."""
         while not self.stop_event.is_set():
             try:
                 update = await asyncio.wait_for(self.queue.get(), timeout=1.0)
@@ -328,59 +328,69 @@ class AISStreamWorker:
             except asyncio.CancelledError:
                 break
 
-            # Attempt database write with retries on SQLite locking
+            # Collect and deduplicate all pending updates in queue
+            updates_to_apply: dict[str, TrafficSnapshotUpdate] = {update.unlocode: update}
+            self.queue.task_done()
+            while not self.queue.empty():
+                try:
+                    u = self.queue.get_nowait()
+                    updates_to_apply[u.unlocode] = u
+                    self.queue.task_done()
+                except asyncio.QueueEmpty:
+                    break
+
+            # Attempt batched database write with retries on SQLite locking
             for attempt in range(5):
                 try:
                     async with self.session_factory() as session:
-                        stmt = select(PortRiskSnapshot).where(
-                            PortRiskSnapshot.unlocode == update.unlocode
-                        )
-                        result = await session.execute(stmt)
-                        snapshots = result.scalars().all()
-                        if snapshots:
-                            for s in snapshots:
-                                s.anchored_vessel_count = update.anchored_count
-                                s.underway_vessel_count = update.underway_count
-                                s.total_active_geofence_count = update.total_count
-                                s.updated_at = utc_now()
-                        else:
-                            # Query watched vessel classes for this port
-                            w_stmt = select(UserWatchlist.vessel_class_id).where(
-                                UserWatchlist.unlocode == update.unlocode
+                        for port_unlocode, item in updates_to_apply.items():
+                            stmt = select(PortRiskSnapshot).where(
+                                PortRiskSnapshot.unlocode == port_unlocode
                             )
-                            w_res = await session.execute(w_stmt)
-                            vessel_classes = set(w_res.scalars().all())
-                            vessel_classes.update({"panamax", "neoPanamax"})
-
-                            for vc in vessel_classes:
-                                new_snapshot = PortRiskSnapshot(
-                                    snapshot_id=uuid.uuid4(),
-                                    unlocode=update.unlocode,
-                                    vessel_class_id=vc,
-                                    anchored_vessel_count=update.anchored_count,
-                                    underway_vessel_count=update.underway_count,
-                                    total_active_geofence_count=update.total_count,
-                                    updated_at=utc_now(),
+                            result = await session.execute(stmt)
+                            snapshots = result.scalars().all()
+                            if snapshots:
+                                for s in snapshots:
+                                    s.anchored_vessel_count = item.anchored_count
+                                    s.underway_vessel_count = item.underway_count
+                                    s.total_active_geofence_count = item.total_count
+                                    s.updated_at = utc_now()
+                            else:
+                                w_stmt = select(UserWatchlist.vessel_class_id).where(
+                                    UserWatchlist.unlocode == port_unlocode
                                 )
-                                session.add(new_snapshot)
-                        await session.commit()
+                                w_res = await session.execute(w_stmt)
+                                vessel_classes = set(w_res.scalars().all())
+                                vessel_classes.update({"panamax", "neoPanamax"})
 
-                        # Accumulate real observation into rolling baseline
-                        await update_port_traffic_baseline_from_observation(
-                            session,
-                            update.unlocode,
-                            anchored_count=update.anchored_count,
-                            underway_count=update.underway_count,
-                            total_count=update.total_count,
-                        )
-                    self.queue.task_done()
+                                for vc in vessel_classes:
+                                    new_snapshot = PortRiskSnapshot(
+                                        snapshot_id=uuid.uuid4(),
+                                        unlocode=port_unlocode,
+                                        vessel_class_id=vc,
+                                        anchored_vessel_count=item.anchored_count,
+                                        underway_vessel_count=item.underway_count,
+                                        total_active_geofence_count=item.total_count,
+                                        updated_at=utc_now(),
+                                    )
+                                    session.add(new_snapshot)
+
+                            # Accumulate real observation into rolling baseline
+                            await update_port_traffic_baseline_from_observation(
+                                session,
+                                port_unlocode,
+                                anchored_count=item.anchored_count,
+                                underway_count=item.underway_count,
+                                total_count=item.total_count,
+                            )
+                        await session.commit()
+                    await asyncio.sleep(1.0)
                     break
                 except Exception as exc:
                     if "locked" in str(exc).lower() and attempt < 4:
-                        await asyncio.sleep(0.05 * (2 ** attempt))
+                        await asyncio.sleep(0.1 * (2 ** attempt))
                         continue
-                    logger.warning("DB write failed for %s (attempt %s): %s", update.unlocode, attempt, exc)
-                    self.queue.task_done()
+                    logger.warning("DB batch write failed (attempt %s): %s", attempt, exc)
                     break
 
     async def _websocket_client_loop(self, ws_url: str = AISSTREAM_URL) -> None:

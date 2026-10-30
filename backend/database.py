@@ -107,10 +107,13 @@ BENCHMARK_7_VESSEL_CLASSES: list[dict[str, Any]] = [
 
 @event.listens_for(Engine, "connect")
 def set_sqlite_pragma(dbapi_connection, connection_record):
-    """Enforce foreign key constraints on SQLite connections."""
+    """Enforce foreign key constraints, busy timeout, and WAL concurrency on SQLite connections."""
     if hasattr(dbapi_connection, "cursor"):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA busy_timeout=30000")
         cursor.close()
 
 
@@ -134,10 +137,17 @@ def get_engine() -> AsyncEngine:
     global _engine
     if _engine is None:
         db_url = get_database_url()
+        connect_args = {}
+        if "sqlite" in db_url:
+            connect_args = {
+                "timeout": 30.0,
+                "check_same_thread": False,
+            }
         _engine = create_async_engine(
             db_url,
             echo=False,
             future=True,
+            connect_args=connect_args,
         )
     return _engine
 
