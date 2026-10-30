@@ -114,12 +114,6 @@ export const PortCard: React.FC<PortCardProps> = ({
               <span>{port.country}</span>
               <span>·</span>
               <span>{port.geofenceRadiusNm} NM Geofence</span>
-              {!port.isDefault && (
-                <>
-                  <span>·</span>
-                  <span className="text-emerald-600 font-medium">Private</span>
-                </>
-              )}
             </div>
           </div>
 

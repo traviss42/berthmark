@@ -347,7 +347,7 @@ function Dashboard({ onNavigate }: DashboardProps) {
             assessment={selectedAssessment}
             onBack={() => setSelectedPortId(null)}
             onRemove={handleRemovePort}
-            canRemove={!selectedPort.isDefault}
+            canRemove={true}
             onRefresh={handleRefreshDetail}
             refreshing={refreshing}
           />
