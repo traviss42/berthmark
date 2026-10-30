@@ -48,6 +48,10 @@ export function PortSearch({
         const ports = await services.ports.searchPorts(query);
         setResults(ports);
         setOpen(true);
+      } catch (err) {
+        console.error('Failed to search ports:', err);
+        setResults([]);
+        setOpen(true);
       } finally {
         setLoading(false);
       }
