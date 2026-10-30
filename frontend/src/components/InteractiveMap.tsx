@@ -38,13 +38,14 @@ export interface InteractiveMapProps {
   onAddFirstPort?: () => void;
   onAddPort?: (port: Omit<Port, 'id' | 'isDefault' | 'addedByUserId'>) => Promise<any> | void;
   className?: string;
+  focusedPortId?: string | null;
 }
 
 // SVG Map dimensions and zoom bounds
 const MAP_WIDTH = 1000;
 const MAP_HEIGHT = 500;
 const MIN_ZOOM = 1;
-const MAX_ZOOM = 24;
+const MAX_ZOOM = 512;
 
 function projectCoordinates(lat: number, lon: number): { x: number; y: number } {
   // Equirectangular projection
@@ -64,6 +65,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   onAddFirstPort,
   onAddPort,
   className = '',
+  focusedPortId,
 }) => {
   const [selectedPortId, setSelectedPortId] = useState<string | null>(null);
   const [selectedAlternative, setSelectedAlternative] = useState<{
@@ -130,6 +132,17 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
       y: Math.min(0, Math.max(minPanY, rawPanY)),
     });
   }, []);
+
+  // Auto-focus on focusedPortId when provided
+  useEffect(() => {
+    if (focusedPortId) {
+      setSelectedPortId(focusedPortId);
+      const port = ports.find((p) => p.id === focusedPortId);
+      if (port && typeof port.lat === 'number' && typeof port.lon === 'number') {
+        zoomToCoords(port.lat, port.lon, Math.max(zoom, 12));
+      }
+    }
+  }, [focusedPortId, ports, zoomToCoords]);
 
   // Zoom controls with viewport bounding and extended range
   const handleZoomIn = () => setZoom((z) => Math.min(Number((z * 1.5).toFixed(2)), MAX_ZOOM));
@@ -368,7 +381,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             d={WORLD_MAP_PATH}
             fill="#1e293b"
             stroke="#334155"
-            strokeWidth={Math.max(0.15, 0.6 * invZoom)}
+            strokeWidth={0.6 * invZoom}
             className="transition-colors"
           />
 
@@ -954,6 +967,21 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                   }
                 }}
               />
+
+              {/* View Full Risk Details Button */}
+              {onViewPortDetail && selectedPort && (
+                <div className="pt-2 border-t border-slate-100 mt-2">
+                  <button
+                    type="button"
+                    data-testid="map-popup-view-detail"
+                    onClick={() => onViewPortDetail(selectedPort.id)}
+                    className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                  >
+                    <Eye className="w-3.5 h-3.5 text-blue-600" />
+                    <span>View Full Risk Details</span>
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

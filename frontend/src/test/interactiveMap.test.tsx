@@ -398,7 +398,7 @@ describe('InteractiveMap Component', () => {
     expect(mapGroup?.getAttribute('transform')).toBe(zoomedTransform);
   });
 
-  it('allows extended zoom up to 24x and displays the zoom level badge', () => {
+  it('allows extended deep zoom up to 512x and displays the zoom level badge', () => {
     render(
       <InteractiveMap
         ports={[mockPort1]}
@@ -411,15 +411,19 @@ describe('InteractiveMap Component', () => {
     const zoomLevelBadge = screen.getByTestId('map-zoom-level');
     expect(zoomLevelBadge).toHaveTextContent('1.0x');
 
-    // Click zoom in 10 times to reach high zoom
+    // Click zoom in 10 times to reach high zoom beyond previous 24x cap
     for (let i = 0; i < 10; i++) {
       fireEvent.click(zoomInBtn);
     }
+    expect(zoomLevelBadge).toHaveTextContent('57.8x');
 
-    // Should reach 24x max zoom
-    expect(zoomLevelBadge).toHaveTextContent('24.0x');
+    // Click additional times to reach maximum deep zoom (512x)
+    for (let i = 0; i < 10; i++) {
+      fireEvent.click(zoomInBtn);
+    }
+    expect(zoomLevelBadge).toHaveTextContent('512.0x');
     const mapGroup = screen.getByTestId('interactive-map-container').querySelector('svg > g');
-    expect(mapGroup?.getAttribute('transform')).toContain('scale(24)');
+    expect(mapGroup?.getAttribute('transform')).toContain('scale(512)');
   });
 
   it('clicking a port pin automatically zooms into the region to differentiate nearby ports', () => {

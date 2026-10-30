@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { Globe, Plus } from 'lucide-react';
-import type { Port, RiskAssessment, VesselClass } from '@/types';
+import type { Port, RiskAssessment, VesselClass, AlternativePortRecommendation } from '@/types';
 import { PortCard } from './PortCard';
 import { formatVesselClass } from '@/utils/riskDisplay';
 

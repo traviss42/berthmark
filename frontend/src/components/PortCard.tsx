@@ -13,7 +13,7 @@ import {
   Minus,
   Trash2,
 } from 'lucide-react';
-import type { Port, RiskAssessment, VesselClass } from '@/types';
+import type { Port, RiskAssessment, VesselClass, AlternativePortRecommendation } from '@/types';
 import {
   formatVesselClass,
   formatQueueVariance,

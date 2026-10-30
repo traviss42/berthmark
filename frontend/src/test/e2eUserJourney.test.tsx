@@ -136,6 +136,8 @@ describe('Frontend End-to-End User Journey (Issue 24)', () => {
             unlocode: 'DEWVN',
             portName: 'Port of Wilhelmshaven',
             country: 'Germany',
+            lat: 53.53,
+            lon: 8.13,
             distanceNm: 140.0,
             channelDepthM: 20.0,
             depthMarginM: 3.28,
@@ -521,5 +523,24 @@ describe('Frontend End-to-End User Journey (Issue 24)', () => {
     expect(screen.getByText(/Weakest-Link Rule/i)).toBeInTheDocument();
     expect(screen.getByText('Sub-Risk Assessment')).toBeInTheDocument();
     expect(screen.getByText('Live Metrics')).toBeInTheDocument();
+
+    // Verify "+ Add to Watchlist" button is visible since port is not yet monitored
+    const addWatchlistBtn = screen.getByTestId('detail-add-port-button');
+    expect(addWatchlistBtn).toBeInTheDocument();
+    expect(addWatchlistBtn).toHaveTextContent('+ Add to Watchlist');
+
+    // Click "+ Add to Watchlist" on the details page
+    fireEvent.click(addWatchlistBtn);
+
+    // Verify button switches to "Remove" once added to watchlist
+    expect(await screen.findByTestId('detail-remove-port-button')).toBeInTheDocument();
+
+    // Verify "View on Map" button is visible and clicking it switches to the map view
+    const viewMapBtn = screen.getByTestId('detail-view-map-button');
+    expect(viewMapBtn).toBeInTheDocument();
+    fireEvent.click(viewMapBtn);
+
+    // Interactive map renders
+    expect(await screen.findByTestId('interactive-map-container')).toBeInTheDocument();
   });
 });

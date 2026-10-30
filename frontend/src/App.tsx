@@ -12,7 +12,7 @@ import {
   Map as MapIcon,
   Loader2,
 } from 'lucide-react';
-import type { VesselClass, RiskAssessment } from '@/types';
+import type { Port, VesselClass, RiskAssessment, AlternativePortRecommendation } from '@/types';
 import { getServices } from '@/services';
 import { usePorts, useRiskAssessments, useNotifications } from '@/hooks/useServices';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
@@ -177,6 +177,9 @@ function Dashboard({ onNavigate }: DashboardProps) {
   const [vesselClass, setVesselClass] = useState<VesselClass>('neoPanamax');
   const [selectedPortId, setSelectedPortId] = useState<string | null>(null);
   const [customDetailAssessment, setCustomDetailAssessment] = useState<RiskAssessment | null>(null);
+  const [currentDetailPortMeta, setCurrentDetailPortMeta] = useState<Partial<Port> | null>(null);
+  const [focusedMapPortId, setFocusedMapPortId] = useState<string | null>(null);
+  const [addingDetailPort, setAddingDetailPort] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -203,6 +206,64 @@ function Dashboard({ onNavigate }: DashboardProps) {
     [assessmentMap, selectedPortId, customDetailAssessment]
   );
 
+  const isPortInWatchlist = useMemo(() => {
+    if (!activeAssessment) return false;
+    const targetId = activeAssessment.portId.toLowerCase();
+    const targetName = activeAssessment.portName.toLowerCase();
+    const targetLocode = (currentDetailPortMeta?.locode || '').toLowerCase();
+
+    return ports.some((p) => {
+      if (p.id.toLowerCase() === targetId) return true;
+      if (p.name.toLowerCase() === targetName) return true;
+      if (targetLocode && p.locode && p.locode.toLowerCase() === targetLocode) return true;
+      if (p.locode && targetId.includes(p.locode.toLowerCase())) return true;
+      return false;
+    });
+  }, [ports, activeAssessment, currentDetailPortMeta]);
+
+  // Dynamically constructed Port object when viewing an alternative or unmonitored port
+  const viewingPort = useMemo(() => {
+    if (!activeAssessment) return null;
+    const existing = ports.find((p) => p.id === activeAssessment.portId);
+    if (existing) return existing;
+    if (
+      currentDetailPortMeta &&
+      typeof currentDetailPortMeta.lat === 'number' &&
+      typeof currentDetailPortMeta.lon === 'number'
+    ) {
+      return {
+        id: activeAssessment.portId,
+        name: activeAssessment.portName,
+        locode:
+          currentDetailPortMeta.locode ||
+          activeAssessment.portId.replace(/^port-/, '').toUpperCase().slice(0, 5),
+        country: currentDetailPortMeta.country || '',
+        lat: currentDetailPortMeta.lat,
+        lon: currentDetailPortMeta.lon,
+        isDefault: false,
+        geofenceRadiusNm: 8,
+        addedByUserId: null,
+        vesselClass: activeAssessment.vesselClass || vesselClass,
+      } as Port;
+    }
+    return null;
+  }, [activeAssessment, ports, currentDetailPortMeta, vesselClass]);
+
+  const mapPorts = useMemo(() => {
+    if (viewingPort && !ports.some((p) => p.id === viewingPort.id)) {
+      return [...ports, viewingPort];
+    }
+    return ports;
+  }, [ports, viewingPort]);
+
+  const mapAssessments = useMemo(() => {
+    const map = new Map(assessmentMap);
+    if (activeAssessment && !map.has(activeAssessment.portId)) {
+      map.set(activeAssessment.portId, activeAssessment);
+    }
+    return map;
+  }, [assessmentMap, activeAssessment]);
+
   const summary = useMemo(() => {
     const high = assessments.filter((a) => a.compositeTier === 'high').length;
     const medium = assessments.filter((a) => a.compositeTier === 'medium').length;
@@ -220,8 +281,43 @@ function Dashboard({ onNavigate }: DashboardProps) {
   }, [refreshRisk]);
 
   const handleSelectPort = useCallback(
-    async (portId: string) => {
+    async (portId: string, candidate?: AlternativePortRecommendation) => {
       setSelectedPortId(portId);
+      if (candidate) {
+        setCurrentDetailPortMeta({
+          id: candidate.portId,
+          name: candidate.portName,
+          locode: candidate.unlocode,
+          country: candidate.country,
+          lat: candidate.lat,
+          lon: candidate.lon,
+        });
+      } else {
+        const inPorts = ports.find((p) => p.id === portId);
+        if (inPorts) {
+          setCurrentDetailPortMeta(inPorts);
+        } else {
+          // Look up from alternatives across all assessments
+          const allAlternatives = [
+            ...(customDetailAssessment?.alternatives || []),
+            ...Array.from(assessmentMap.values()).flatMap((a) => a.alternatives || []),
+          ];
+          const foundAlt = allAlternatives.find(
+            (a) => a.portId === portId || a.unlocode.toLowerCase() === portId.toLowerCase()
+          );
+          if (foundAlt) {
+            setCurrentDetailPortMeta({
+              id: foundAlt.portId,
+              name: foundAlt.portName,
+              locode: foundAlt.unlocode,
+              country: foundAlt.country,
+              lat: foundAlt.lat,
+              lon: foundAlt.lon,
+            });
+          }
+        }
+      }
+
       const existing = assessmentMap.get(portId);
       if (existing) {
         setCustomDetailAssessment(null);
@@ -237,8 +333,63 @@ function Dashboard({ onNavigate }: DashboardProps) {
         setDetailLoading(false);
       }
     },
-    [assessmentMap, vesselClass]
+    [assessmentMap, vesselClass, ports, customDetailAssessment]
   );
+
+  const handleAddDetailPort = useCallback(async () => {
+    if (!activeAssessment) return;
+    setAddingDetailPort(true);
+    try {
+      let meta = currentDetailPortMeta;
+      if (!meta || typeof meta.lat !== 'number' || typeof meta.lon !== 'number' || !meta.locode) {
+        try {
+          const results = await getServices().ports.searchPorts(activeAssessment.portName);
+          const found =
+            results.find(
+              (p) =>
+                p.id === activeAssessment.portId ||
+                p.locode.toUpperCase() === activeAssessment.portId.replace(/^port-/, '').toUpperCase() ||
+                p.name.toLowerCase() === activeAssessment.portName.toLowerCase()
+            ) || results[0];
+          if (found && typeof found.lat === 'number' && typeof found.lon === 'number') {
+            meta = {
+              name: found.name,
+              locode: found.locode,
+              country: found.country,
+              lat: found.lat,
+              lon: found.lon,
+            };
+          }
+        } catch (e) {
+          console.error('Failed to resolve port coordinates via search', e);
+        }
+      }
+
+      if (!meta || typeof meta.lat !== 'number' || typeof meta.lon !== 'number') {
+        console.warn('Cannot add port without valid coordinates (AGENTS.md rule)');
+        return;
+      }
+
+      await addPort({
+        name: meta.name || activeAssessment.portName,
+        locode: meta.locode || activeAssessment.portId.replace(/^port-/, '').toUpperCase().slice(0, 5),
+        country: meta.country || 'International',
+        lat: meta.lat,
+        lon: meta.lon,
+        geofenceRadiusNm: 8,
+        vesselClass: activeAssessment.vesselClass || vesselClass,
+      });
+    } finally {
+      setAddingDetailPort(false);
+    }
+  }, [activeAssessment, currentDetailPortMeta, addPort, vesselClass]);
+
+  const handleViewOnMap = useCallback(() => {
+    if (activeAssessment) {
+      setFocusedMapPortId(activeAssessment.portId);
+    }
+    setViewMode('map');
+  }, [activeAssessment]);
 
   const handleRefreshDetail = useCallback(async () => {
     if (!selectedPortId) return;
@@ -259,13 +410,22 @@ function Dashboard({ onNavigate }: DashboardProps) {
     async (portId?: string) => {
       const targetId = portId || selectedPortId;
       if (!targetId) return;
-      await removePort(targetId);
-      if (selectedPortId === targetId) {
+
+      const matched = ports.find(
+        (p) =>
+          p.id === targetId ||
+          p.name.toLowerCase() === (activeAssessment?.portName || '').toLowerCase() ||
+          (p.locode && targetId.toLowerCase().includes(p.locode.toLowerCase()))
+      );
+      const idToRemove = matched ? matched.id : targetId;
+      await removePort(idToRemove);
+      if (selectedPortId === targetId || matched?.id === selectedPortId) {
         setSelectedPortId(null);
         setCustomDetailAssessment(null);
+        setCurrentDetailPortMeta(null);
       }
     },
-    [removePort, selectedPortId]
+    [removePort, selectedPortId, ports, activeAssessment]
   );
 
   // Close notification panel on Escape key
@@ -385,12 +545,17 @@ function Dashboard({ onNavigate }: DashboardProps) {
             onBack={() => {
               setSelectedPortId(null);
               setCustomDetailAssessment(null);
+              setCurrentDetailPortMeta(null);
             }}
-            onRemove={selectedPort ? () => handleRemovePort(selectedPort.id) : undefined}
-            canRemove={Boolean(selectedPort)}
+            onRemove={isPortInWatchlist ? () => handleRemovePort(activeAssessment.portId) : undefined}
+            canRemove={isPortInWatchlist}
+            onAdd={handleAddDetailPort}
+            canAdd={!isPortInWatchlist}
+            adding={addingDetailPort}
             onRefresh={handleRefreshDetail}
             refreshing={refreshing}
             onSelectAlternative={handleSelectPort}
+            onViewOnMap={handleViewOnMap}
           />
         ) : (
           <div className="space-y-6">
@@ -493,8 +658,8 @@ function Dashboard({ onNavigate }: DashboardProps) {
 
               {viewMode === 'map' ? (
                 <InteractiveMap
-                  ports={ports}
-                  assessments={assessmentMap}
+                  ports={mapPorts}
+                  assessments={mapAssessments}
                   vesselClass={vesselClass}
                   onSelectPort={handleSelectPort}
                   onViewPortDetail={(portId) => {
@@ -506,6 +671,7 @@ function Dashboard({ onNavigate }: DashboardProps) {
                     input?.focus();
                   }}
                   onAddPort={addPort}
+                  focusedPortId={focusedMapPortId}
                 />
               ) : (
                 <PortList

@@ -1,5 +1,5 @@
-import { ArrowLeft, MapPin, Trash2, RefreshCw, Wind, Waves, Eye, Compass, Anchor } from 'lucide-react';
-import type { RiskAssessment } from '@/types';
+import { ArrowLeft, MapPin, Trash2, RefreshCw, Wind, Waves, Eye, Compass, Anchor, Plus, Map } from 'lucide-react';
+import type { RiskAssessment, AlternativePortRecommendation } from '@/types';
 import { RiskBadge } from './RiskBadge';
 import { SubRiskBreakdown } from './SubRiskBreakdown';
 import { AlternativePortDiversion } from './AlternativePortDiversion';
@@ -10,9 +10,13 @@ interface Props {
   onBack: () => void;
   onRemove?: () => void;
   canRemove: boolean;
+  onAdd?: () => void;
+  canAdd?: boolean;
+  adding?: boolean;
   onRefresh: () => void;
   refreshing: boolean;
   onSelectAlternative?: (portId: string) => void;
+  onViewOnMap?: () => void;
 }
 
 export function PortRiskDetail({
@@ -20,9 +24,13 @@ export function PortRiskDetail({
   onBack,
   onRemove,
   canRemove,
+  onAdd,
+  canAdd,
+  adding,
   onRefresh,
   refreshing,
   onSelectAlternative,
+  onViewOnMap,
 }: Props) {
   const m = assessment.metrics;
   const compositeColors = TIER_COLORS[assessment.compositeTier];
@@ -49,21 +57,46 @@ export function PortRiskDetail({
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {onViewOnMap && (
+            <button
+              type="button"
+              data-testid="detail-view-map-button"
+              onClick={onViewOnMap}
+              className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition-colors text-slate-700 font-medium cursor-pointer"
+            >
+              <Map className="w-4 h-4 text-slate-500" />
+              <span>View on Map</span>
+            </button>
+          )}
           <button
             onClick={onRefresh}
             disabled={refreshing}
-            className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 transition-colors"
+            className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 transition-colors cursor-pointer"
           >
             <RefreshCw className={`w-4 h-4 text-slate-500 ${refreshing ? 'animate-spin' : ''}`} />
             <span className="text-slate-600">Refresh</span>
           </button>
+          {canAdd && onAdd && (
+            <button
+              type="button"
+              data-testid="detail-add-port-button"
+              onClick={onAdd}
+              disabled={adding}
+              className="flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold transition-colors cursor-pointer shadow-xs"
+            >
+              <Plus className="w-4 h-4" />
+              <span>{adding ? 'Adding...' : '+ Add to Watchlist'}</span>
+            </button>
+          )}
           {canRemove && onRemove && (
             <button
+              type="button"
+              data-testid="detail-remove-port-button"
               onClick={onRemove}
-              className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
+              className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors cursor-pointer"
             >
               <Trash2 className="w-4 h-4" />
-              Remove
+              <span>Remove</span>
             </button>
           )}
         </div>
